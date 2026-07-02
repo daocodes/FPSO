@@ -1,0 +1,5 @@
+wrds
+numpy
+pandas
+python-dotenv
+matplotlib

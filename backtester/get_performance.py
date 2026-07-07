@@ -1,6 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
 from algorithm.firefly import firefly
+from algorithm.data_caller import get_data, normalize_wrds_data
 
 #takes the performance and plots the cumulative return of the strategy
 #random perturbation epsilon is adjusted each iteration (n=50 here) to give us a robust understanding
@@ -21,12 +23,84 @@ def compute_sharpe(returns):
             sharpe_values[index] = np.sqrt(252) * window.mean() / window_std
     return sharpe_values
 
+def _build_random_portfolio_returns(data, asset_cap=30, timesteps=100, seed=None):
+    frame = data.copy()
+    frame["date"] = pd.to_datetime(frame["date"])
+    frame = frame.sort_values(["date", "permno"]).dropna(subset=["ret"])
+
+    dates = pd.Index(frame["date"].drop_duplicates().sort_values())
+    rng = np.random.default_rng(seed)
+    portfolio_returns = []
+
+    for start_index in range(0, max(len(dates) - 1, 0), timesteps):
+        rebalance_date = dates[start_index]
+        holding_dates = dates[start_index + 1 : start_index + 1 + timesteps]
+
+        if len(holding_dates) == 0:
+            break
+
+        universe = frame.loc[frame["date"] == rebalance_date, "permno"].dropna().unique()
+        if len(universe) == 0:
+            continue
+
+        chosen_assets = rng.choice(universe, size=min(asset_cap, len(universe)), replace=False)
+        weights = rng.dirichlet(np.ones(len(chosen_assets)))
+
+        window = frame.loc[
+            frame["date"].isin(holding_dates) & frame["permno"].isin(chosen_assets),
+            ["date", "permno", "ret"],
+        ]
+
+        daily_matrix = (
+            window.pivot_table(index="date", columns="permno", values="ret", aggfunc="last")
+            .reindex(index=holding_dates, columns=chosen_assets)
+            .fillna(0.0)
+        )
+
+        period_returns = daily_matrix.to_numpy() @ weights
+        portfolio_returns.extend(period_returns.tolist())
+
+    return np.asarray(portfolio_returns, dtype=float)
+
+def track_random_performance(data=None, asset_cap=30, iterations=50, timesteps=100, seed=42):
+    if data is None:
+        data = get_data()
+
+    simulated_returns = []
+
+    for iteration in range(iterations):
+        result = _build_random_portfolio_returns(
+            data,
+            asset_cap=asset_cap,
+            timesteps=timesteps,
+            seed=seed + iteration,
+        )
+        simulated_returns.append(to_1d_array(result))
+
+    if not simulated_returns:
+        empty = np.array([], dtype=float)
+        return empty, empty, empty
+
+    return_matrix = np.vstack(simulated_returns)
+    average_returns = return_matrix.mean(axis=0)
+    cumulative_performance = np.cumprod(1.0 + average_returns) - 1.0
+
+    periods = np.arange(1, len(average_returns) + 1, dtype=float)
+    annualized_performance = np.where(
+        periods > 0,
+        np.power(1.0 + cumulative_performance, 252.0 / periods) - 1.0,
+        0.0,
+    )
+
+    sharpe = compute_sharpe(average_returns)
+    return cumulative_performance, annualized_performance, sharpe
+
 def track_performance(data, epsilon=0.01, iterations=50, timesteps=100):
     simulated_returns = []
 
     for _ in range(iterations):
         data_copy = data.copy()
-        result = firefly(data_copy, epsilon=epsilon, timesteps=timesteps)
+        result = firefly(data_copy, epsilon=epsilon, timesteps=timesteps, asset_cap=30)
         simulated_returns.append(to_1d_array(result))
 
     return_matrix = np.vstack(simulated_returns)

@@ -27,6 +27,10 @@ def get_wrds_data():
     db.close()
     return data
 
+
+def get_data():
+    return get_wrds_data()
+
 def normalize_wrds_data(data):
     frame = data
     frame["date"] = pd.to_datetime(frame["date"])

@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
-from algorithm.firefly import firefly
+from algorithm.fpso_optimizer import firefly
 from algorithm.data_caller import get_data, normalize_wrds_data
 
 #takes the performance and plots the cumulative return of the strategy
@@ -115,6 +115,61 @@ def track_performance(data, epsilon=0.01, iterations=50, timesteps=100):
     )
 
     sharpe = compute_sharpe(average_returns)
+    return cumulative_performance, annualized_performance, sharpe
+
+def track_oracle_performance(data, timesteps=100, transaction_cost=0.001):
+    frame = data.copy()
+    frame["date"] = pd.to_datetime(frame["date"])
+    frame = frame.sort_values(["date", "permno"]).dropna(subset=["ret"])
+
+    dates = pd.Index(frame["date"].drop_duplicates().sort_values())
+    oracle_returns = []
+
+    for start_index in range(timesteps, len(dates), timesteps):
+        holding_dates = dates[start_index : start_index + timesteps]
+        if len(holding_dates) == 0:
+            break
+
+        universe = frame.loc[frame["date"] == dates[start_index - 1], "permno"].dropna().unique()
+        if len(universe) == 0:
+            continue
+
+        window = frame.loc[
+            frame["date"].isin(holding_dates) & frame["permno"].isin(universe),
+            ["date", "permno", "ret"],
+        ]
+        daily_matrix = (
+            window.pivot_table(index="date", columns="permno", values="ret", aggfunc="last")
+            .reindex(index=holding_dates, columns=universe)
+            .sort_index()
+            .ffill()
+            .fillna(0.0)
+        )
+        if daily_matrix.empty:
+            continue
+
+        best_returns = daily_matrix.max(axis=1).to_numpy(dtype=float)
+        holdings = daily_matrix.idxmax(axis=1).to_numpy()
+        costs = np.zeros_like(best_returns)
+        if len(holdings) > 1:
+            switches = holdings[1:] != holdings[:-1]
+            costs[1:][switches] = transaction_cost
+        costs[-1] += transaction_cost
+        oracle_returns.extend((best_returns - costs).tolist())
+
+    oracle_returns = np.asarray(oracle_returns, dtype=float)
+    if oracle_returns.size == 0:
+        empty = np.array([], dtype=float)
+        return empty, empty, empty
+
+    cumulative_performance = np.cumprod(1.0 + oracle_returns) - 1.0
+    periods = np.arange(1, len(oracle_returns) + 1, dtype=float)
+    annualized_performance = np.where(
+        periods > 0,
+        np.power(1.0 + cumulative_performance, 252.0 / periods) - 1.0,
+        0.0,
+    )
+    sharpe = compute_sharpe(oracle_returns)
     return cumulative_performance, annualized_performance, sharpe
 
 def visualize_performance(returns, sharpe, annualized_performance):

@@ -1,6 +1,8 @@
 import numpy as np
+import pandas as pd
 
 from algorithm.portfolio_model import evaluate_fitness
+from algorithm.utils import generate_naive_equal_weight
 
 
 class Particle:
@@ -265,4 +267,77 @@ class FPSO:
             self.history.append(self.global_best_fitness)
 
         # Return best found portfolio and objective trajectory.
-        return self.global_best_weights.copy(), np.array(self.history, dtype=float)
+        return self.global_best_weights, np.array(self.history, dtype=float)
+
+
+def firefly(data, epsilon=0.01, timesteps=100, asset_cap=30):
+    frame = data.copy()
+    frame["date"] = pd.to_datetime(frame["date"])
+    frame = frame.sort_values(["date", "permno"]).dropna(subset=["ret"])
+
+    dates = pd.Index(frame["date"].drop_duplicates().sort_values())
+    if len(dates) < 2:
+        return np.array([], dtype=float)
+
+    portfolio_returns: list[float] = []
+    weights_prev = None
+
+    for end_index in range(timesteps, len(dates), timesteps):
+        train_dates = dates[max(0, end_index - timesteps) : end_index]
+        hold_dates = dates[end_index : end_index + timesteps]
+        if len(train_dates) == 0 or len(hold_dates) == 0:
+            break
+
+        universe = frame.loc[frame["date"] == train_dates[-1], "permno"].dropna().unique()
+        if len(universe) == 0:
+            continue
+
+        chosen_assets = np.asarray(universe[: min(asset_cap, len(universe))])
+        train_window = frame.loc[
+            frame["date"].isin(train_dates) & frame["permno"].isin(chosen_assets),
+            ["date", "permno", "ret"],
+        ]
+        hold_window = frame.loc[
+            frame["date"].isin(hold_dates) & frame["permno"].isin(chosen_assets),
+            ["date", "permno", "ret"],
+        ]
+        if train_window.empty or hold_window.empty:
+            continue
+
+        train_matrix = (
+            train_window.pivot_table(index="date", columns="permno", values="ret", aggfunc="last")
+            .reindex(columns=chosen_assets)
+            .sort_index()
+            .ffill()
+            .fillna(0.0)
+        )
+        hold_matrix = (
+            hold_window.pivot_table(index="date", columns="permno", values="ret", aggfunc="last")
+            .reindex(index=hold_dates, columns=chosen_assets)
+            .sort_index()
+            .ffill()
+            .fillna(0.0)
+        )
+
+        expected_returns = train_matrix.mean().to_numpy(dtype=float) * 252.0
+        covariance = train_matrix.cov().fillna(0.0).to_numpy(dtype=float) * 252.0
+        optimizer = FPSO(
+            num_particles=30,
+            num_assets=len(chosen_assets),
+            max_iter=max(20, int(50 * max(float(epsilon), 1e-3))),
+            beta_0=1.0,
+            gamma=1.0,
+            alpha=max(float(epsilon), 1e-3),
+            delta=1e-6,
+        )
+        optimizer.K = len(chosen_assets)
+        optimizer.u = 1.0
+        if weights_prev is None or len(weights_prev) != len(chosen_assets):
+            weights_prev = generate_naive_equal_weight(len(chosen_assets))
+
+        best_weights, _ = optimizer.optimize(expected_returns, covariance, weights_prev)
+        weights_prev = best_weights
+        period_returns = hold_matrix.to_numpy(dtype=float) @ best_weights
+        portfolio_returns.extend(period_returns.tolist())
+
+    return np.asarray(portfolio_returns, dtype=float)

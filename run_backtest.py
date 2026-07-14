@@ -9,7 +9,14 @@ from algorithm.data_processor import (
     get_sp500_constituents,
 )
 from algorithm.fpso_optimizer import FPSO
+from algorithm.portfolio_model import calculate_portfolio_return
 from algorithm.utils import generate_naive_equal_weight
+from backtester.get_performance import (
+    path_performance,
+    summarize_performance,
+    to_1d_array,
+    visualize_performance,
+)
 
 
 def _fetch_returns_matrix(
@@ -39,42 +46,6 @@ def _fetch_returns_matrix(
     return clean_and_pivot_data(raw)
 
 
-def _compute_basic_metrics(returns: np.ndarray) -> dict[str, float]:
-    r = np.asarray(returns, dtype=float).reshape(-1)
-    if r.size == 0:
-        return {
-            "days": 0,
-            "total_return": 0.0,
-            "annual_return": 0.0,
-            "annual_vol": 0.0,
-            "sharpe": 0.0,
-            "max_drawdown": 0.0,
-        }
-
-    equity = np.cumprod(1.0 + r)
-    total_return = float(equity[-1] - 1.0)
-    annual_return = float((1.0 + total_return) ** (252.0 / len(r)) - 1.0)
-
-    daily_std = float(np.std(r, ddof=1)) if len(r) > 1 else 0.0
-    annual_vol = float(daily_std * np.sqrt(252.0))
-
-    daily_mean = float(np.mean(r))
-    sharpe = 0.0 if daily_std == 0 else float(np.sqrt(252.0) * daily_mean / daily_std)
-
-    running_peak = np.maximum.accumulate(equity)
-    drawdowns = equity / running_peak - 1.0
-    max_drawdown = float(np.min(drawdowns))
-
-    return {
-        "days": int(len(r)),
-        "total_return": total_return,
-        "annual_return": annual_return,
-        "annual_vol": annual_vol,
-        "sharpe": sharpe,
-        "max_drawdown": max_drawdown,
-    }
-
-
 def _align_prev_weights(
     w_prev: pd.Series | None, assets: pd.Index
 ) -> np.ndarray:
@@ -102,7 +73,7 @@ def _apply_transaction_cost(
     cost = tc_rate * one_way_turnover
     Example: tc_rate=0.01 and turnover=0.40 => pay 0.4% of NAV once at rebalance.
     """
-    net = np.asarray(gross_returns, dtype=float).copy()
+    net = to_1d_array(gross_returns).copy()
     if net.size == 0:
         return net
     net[0] -= tc_rate * one_way_turnover
@@ -154,17 +125,30 @@ def _run_window(
     best_weights, _ = optimizer.optimize(mu, sigma, w_prev_arr)
     turnover = _one_way_turnover(best_weights, w_prev_arr)
 
-    train_returns = train_matrix.to_numpy() @ best_weights
-    test_returns_gross = test_matrix.to_numpy() @ best_weights
+    # In-sample objective R(w*) from portfolio_model.py:
+    # R(w) = mu^T w - lambda_v * sqrt(w^T Sigma w) - lambda_t * TO(w, w_prev)
+    objective_R = calculate_portfolio_return(
+        weights=best_weights,
+        expected_returns=mu,
+        covariance=sigma,
+        weights_prev=w_prev_arr,
+        lambda_v=optimizer.lambda_v,
+        lambda_t=optimizer.lambda_t,
+    )
+
+    # OOS / train PnL paths use realized asset returns × weights (not R(w)).
+    train_returns = to_1d_array(train_matrix.to_numpy() @ best_weights)
+    test_returns_gross = to_1d_array(test_matrix.to_numpy() @ best_weights)
     w_star = pd.Series(best_weights, index=common_assets)
 
     return {
         "w_star": w_star,
         "turnover": turnover,
+        "objective_R": objective_R,
         "train_returns": train_returns,
         "test_returns_gross": test_returns_gross,
-        "train_metrics": _compute_basic_metrics(train_returns),
-        "test_metrics_gross": _compute_basic_metrics(test_returns_gross),
+        "train_metrics": summarize_performance(train_returns),
+        "test_metrics_gross": summarize_performance(test_returns_gross),
     }
 
 
@@ -175,6 +159,8 @@ def main():
     num_assets = 50
     # One-way proportional cost rates (same sweep style as the CNN-EF paper).
     tc_rates = [0.0, 0.005, 0.01, 0.015]
+    # Set True to open the cumulative / Sharpe plots from get_performance.
+    show_plots = False
 
     window_results: list[dict] = []
     w_prev: pd.Series | None = None
@@ -211,6 +197,7 @@ def main():
                 {
                     "test_year": test_year,
                     "turnover": result["turnover"],
+                    "objective_R": result["objective_R"],
                     "test_returns_gross": result["test_returns_gross"],
                     "test_metrics_gross": result["test_metrics_gross"],
                 }
@@ -219,7 +206,8 @@ def main():
             w_prev = result["w_star"]
 
             print(
-                f"  gross OOS ann={result['test_metrics_gross']['annual_return']:.4f} | "
+                f"  R(w*)={result['objective_R']:.4f} | "
+                f"gross OOS ann={result['test_metrics_gross']['annual_return']:.4f} | "
                 f"sharpe={result['test_metrics_gross']['sharpe']:.4f} | "
                 f"one-way TO={result['turnover']:.4f}",
                 flush=True,
@@ -239,12 +227,15 @@ def main():
     print(
         f"{'TC':>8} {'AnnRet':>10} {'AnnVol':>10} {'Sharpe':>10} {'MDD':>10} {'AvgTO':>10}"
     )
+    net_by_tc: dict[float, np.ndarray] = {}
     for tc in tc_rates:
         net_chunks = [
             _apply_transaction_cost(row["test_returns_gross"], row["turnover"], tc)
             for row in window_results
         ]
-        metrics = _compute_basic_metrics(np.concatenate(net_chunks))
+        net_path = to_1d_array(np.concatenate(net_chunks))
+        net_by_tc[tc] = net_path
+        metrics = summarize_performance(net_path)
         avg_to = float(np.mean([row["turnover"] for row in window_results]))
         print(
             f"{tc:8.1%} {metrics['annual_return']:10.4f} "
@@ -261,6 +252,21 @@ def main():
             f"sharpe={m['sharpe']:.4f}, "
             f"mdd={m['max_drawdown']:.4f}, "
             f"TO={row['turnover']:.4f}"
+        )
+
+    # Full OOS path diagnostics from get_performance helpers.
+    baseline_path = net_by_tc[0.0]
+    paths = path_performance(baseline_path)
+    print("\n--- Full OOS path (TC = 0) via get_performance ---")
+    print(f"  final cumulative return: {paths['cumulative'][-1]:.4f}")
+    print(f"  final annualized return: {paths['annualized'][-1]:.4f}")
+    print(f"  final expanding Sharpe:  {paths['sharpe'][-1]:.4f}")
+
+    if show_plots:
+        visualize_performance(
+            baseline_path,
+            sharpe=paths["sharpe"],
+            annualized_performance=paths["annualized"],
         )
 
 

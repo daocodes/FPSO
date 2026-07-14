@@ -1,18 +1,16 @@
+"""Performance helpers used by the FPSO rolling backtest."""
+
 import numpy as np
 import matplotlib.pyplot as plt
-import pandas as pd
-from algorithm.firefly import firefly
-from algorithm.data_caller import get_data, normalize_wrds_data
-
-#takes the performance and plots the cumulative return of the strategy
-#random perturbation epsilon is adjusted each iteration (n=50 here) to give us a robust understanding
 
 
-def to_1d_array(result):
-    array = np.asarray(result, dtype=float).reshape(-1)
-    return array
+def to_1d_array(result) -> np.ndarray:
+    return np.asarray(result, dtype=float).reshape(-1)
 
-def compute_sharpe(returns):
+
+def compute_sharpe(returns) -> np.ndarray:
+    """Expanding-window annualized Sharpe (rf = 0) at each time step."""
+    returns = to_1d_array(returns)
     sharpe_values = np.empty(len(returns), dtype=float)
     for index in range(len(returns)):
         window = returns[: index + 1]
@@ -23,7 +21,105 @@ def compute_sharpe(returns):
             sharpe_values[index] = np.sqrt(252) * window.mean() / window_std
     return sharpe_values
 
+
+def cumulative_and_annualized(returns) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Full-path performance series:
+      cumulative_performance[t] = prod(1+r)_0..t - 1
+      annualized_performance[t] = (1 + cum[t])^(252/(t+1)) - 1
+    """
+    returns = to_1d_array(returns)
+    if returns.size == 0:
+        empty = np.array([], dtype=float)
+        return empty, empty
+
+    cumulative_performance = np.cumprod(1.0 + returns) - 1.0
+    periods = np.arange(1, len(returns) + 1, dtype=float)
+    annualized_performance = np.power(1.0 + cumulative_performance, 252.0 / periods) - 1.0
+    return cumulative_performance, annualized_performance
+
+
+def summarize_performance(returns) -> dict[str, float]:
+    """Scalar summary metrics for a daily return path (used by run_backtest)."""
+    r = to_1d_array(returns)
+    if r.size == 0:
+        return {
+            "days": 0,
+            "total_return": 0.0,
+            "annual_return": 0.0,
+            "annual_vol": 0.0,
+            "sharpe": 0.0,
+            "max_drawdown": 0.0,
+        }
+
+    cumulative, annualized = cumulative_and_annualized(r)
+    equity = 1.0 + cumulative
+    total_return = float(cumulative[-1])
+    annual_return = float(annualized[-1])
+
+    daily_std = float(np.std(r, ddof=1)) if len(r) > 1 else 0.0
+    annual_vol = float(daily_std * np.sqrt(252.0))
+    daily_mean = float(np.mean(r))
+    sharpe = 0.0 if daily_std == 0 else float(np.sqrt(252.0) * daily_mean / daily_std)
+
+    running_peak = np.maximum.accumulate(equity)
+    drawdowns = equity / running_peak - 1.0
+    max_drawdown = float(np.min(drawdowns))
+
+    return {
+        "days": int(len(r)),
+        "total_return": total_return,
+        "annual_return": annual_return,
+        "annual_vol": annual_vol,
+        "sharpe": sharpe,
+        "max_drawdown": max_drawdown,
+    }
+
+
+def path_performance(returns) -> dict[str, np.ndarray]:
+    """Return the expanding performance paths used for plotting / diagnostics."""
+    r = to_1d_array(returns)
+    cumulative, annualized = cumulative_and_annualized(r)
+    return {
+        "returns": r,
+        "cumulative": cumulative,
+        "annualized": annualized,
+        "sharpe": compute_sharpe(r),
+    }
+
+
+def visualize_performance(returns, sharpe=None, annualized_performance=None):
+    """Plot cumulative and annualized performance over time."""
+    paths = path_performance(returns)
+    if sharpe is None:
+        sharpe = paths["sharpe"]
+    if annualized_performance is None:
+        annualized_performance = paths["annualized"]
+
+    fig, axes = plt.subplots(2, 1, figsize=(12, 10), sharex=True)
+
+    axes[0].plot(paths["cumulative"], color="blue", linewidth=1.5)
+    axes[0].set_title("Cumulative returns over time")
+    axes[0].set_ylabel("Cumulative return")
+    axes[0].grid(True, alpha=0.3)
+
+    axes[1].plot(annualized_performance, color="green", linewidth=1.5, label="Ann. return")
+    axes[1].plot(sharpe, color="orange", linewidth=1.2, alpha=0.85, label="Expanding Sharpe")
+    axes[1].set_title("Annualized performance and expanding Sharpe")
+    axes[1].set_ylabel("Value")
+    axes[1].legend()
+    axes[1].grid(True, alpha=0.3)
+
+    fig.tight_layout()
+    plt.show()
+    return fig, axes
+
+
+# --- Legacy Monte Carlo baselines (optional; require long-format CRSP panel) ---
+
 def _build_random_portfolio_returns(data, asset_cap=30, timesteps=100, seed=None):
+    import pandas as pd
+
     frame = data.copy()
     frame["date"] = pd.to_datetime(frame["date"])
     frame = frame.sort_values(["date", "permno"]).dropna(subset=["ret"])
@@ -43,7 +139,9 @@ def _build_random_portfolio_returns(data, asset_cap=30, timesteps=100, seed=None
         if len(universe) == 0:
             continue
 
-        chosen_assets = rng.choice(universe, size=min(asset_cap, len(universe)), replace=False)
+        chosen_assets = rng.choice(
+            universe, size=min(asset_cap, len(universe)), replace=False
+        )
         weights = rng.dirichlet(np.ones(len(chosen_assets)))
 
         window = frame.loc[
@@ -62,10 +160,8 @@ def _build_random_portfolio_returns(data, asset_cap=30, timesteps=100, seed=None
 
     return np.asarray(portfolio_returns, dtype=float)
 
-def track_random_performance(data=None, asset_cap=30, iterations=50, timesteps=100, seed=42):
-    if data is None:
-        data = get_data()
 
+def track_random_performance(data, asset_cap=30, iterations=50, timesteps=100, seed=42):
     simulated_returns = []
 
     for iteration in range(iterations):
@@ -83,53 +179,8 @@ def track_random_performance(data=None, asset_cap=30, iterations=50, timesteps=1
 
     return_matrix = np.vstack(simulated_returns)
     average_returns = return_matrix.mean(axis=0)
-    cumulative_performance = np.cumprod(1.0 + average_returns) - 1.0
-
-    periods = np.arange(1, len(average_returns) + 1, dtype=float)
-    annualized_performance = np.where(
-        periods > 0,
-        np.power(1.0 + cumulative_performance, 252.0 / periods) - 1.0,
-        0.0,
+    cumulative_performance, annualized_performance = cumulative_and_annualized(
+        average_returns
     )
-
     sharpe = compute_sharpe(average_returns)
     return cumulative_performance, annualized_performance, sharpe
-
-def track_performance(data, epsilon=0.01, iterations=50, timesteps=100):
-    simulated_returns = []
-
-    for _ in range(iterations):
-        data_copy = data.copy()
-        result = firefly(data_copy, epsilon=epsilon, timesteps=timesteps, asset_cap=30)
-        simulated_returns.append(to_1d_array(result))
-
-    return_matrix = np.vstack(simulated_returns)
-    average_returns = return_matrix.mean(axis=0)
-    cumulative_performance = np.cumprod(1.0 + average_returns) - 1.0
-
-    periods = np.arange(1, len(average_returns) + 1, dtype=float)
-    annualized_performance = np.where(
-        periods > 0,
-        np.power(1.0 + cumulative_performance, 252.0 / periods) - 1.0,
-        0.0,
-    )
-
-    sharpe = compute_sharpe(average_returns)
-    return cumulative_performance, annualized_performance, sharpe
-
-def visualize_performance(returns, sharpe, annualized_performance):
-    fig, axes = plt.subplots(2, 1, figsize=(12, 10), sharex=True)
-
-    axes[0].plot(returns, color="blue", linewidth=1.5)
-    axes[0].set_title("Returns over time")
-    axes[0].set_ylabel("Returns")
-    axes[0].grid(True, alpha=0.3)
-
-    axes[1].plot(annualized_performance, color="green", linewidth=1.5)
-    axes[1].set_title("Annualized performance over time")
-    axes[1].set_ylabel("Annualized Return")
-    axes[1].grid(True, alpha=0.3)
-
-    fig.tight_layout()
-    plt.show()
-    return fig, axes

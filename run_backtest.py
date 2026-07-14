@@ -75,40 +75,70 @@ def _compute_basic_metrics(returns: np.ndarray) -> dict[str, float]:
     }
 
 
-def main():
-    # Keep this configuration block short and easy to edit.
-    target_date = "2024-01-31"
-    train_start = "2023-02-01"
-    train_end = "2024-01-31"
-    test_start = "2024-02-01"
-    test_end = "2024-06-30"
-    num_assets = 50
+def _align_prev_weights(
+    w_prev: pd.Series | None, assets: pd.Index
+) -> np.ndarray:
+    """Map last-period weights onto this window's asset list (missing => 0)."""
+    if w_prev is None:
+        return generate_naive_equal_weight(len(assets))
+    aligned = w_prev.reindex(assets).fillna(0.0).to_numpy(dtype=float)
+    # If everything was new names, fall back to equal weight so TO is well-defined.
+    if float(np.sum(aligned)) < 1e-12:
+        return generate_naive_equal_weight(len(assets))
+    return aligned
 
-    # 1) Load universe and return matrices.
-    db = create_wrds_connection()
-    try:
-        universe = get_sp500_constituents(db, target_date)[:num_assets]
-        train_matrix = _fetch_returns_matrix(db, universe, train_start, train_end)
-        test_matrix = _fetch_returns_matrix(db, universe, test_start, test_end)
-    finally:
-        db.close()
+
+def _one_way_turnover(w_new: np.ndarray, w_prev: np.ndarray) -> float:
+    """One-way turnover = 0.5 * L1 weight change (standard portfolio convention)."""
+    return float(0.5 * np.sum(np.abs(w_new - w_prev)))
+
+
+def _apply_transaction_cost(
+    gross_returns: np.ndarray, one_way_turnover: float, tc_rate: float
+) -> np.ndarray:
+    """
+    Subtract proportional trading cost on the rebalance day (first day of the window).
+
+    cost = tc_rate * one_way_turnover
+    Example: tc_rate=0.01 and turnover=0.40 => pay 0.4% of NAV once at rebalance.
+    """
+    net = np.asarray(gross_returns, dtype=float).copy()
+    if net.size == 0:
+        return net
+    net[0] -= tc_rate * one_way_turnover
+    return net
+
+
+def _run_window(
+    db,
+    train_start: str,
+    train_end: str,
+    test_start: str,
+    test_end: str,
+    num_assets: int,
+    w_prev: pd.Series | None = None,
+) -> dict:
+    """Optimize on one 12-month train window; evaluate gross OOS returns + turnover."""
+    universe = get_sp500_constituents(db, train_end)[:num_assets]
+    train_matrix = _fetch_returns_matrix(db, universe, train_start, train_end)
+    test_matrix = _fetch_returns_matrix(db, universe, test_start, test_end)
 
     if train_matrix.empty or test_matrix.empty:
-        raise ValueError("Train/test return matrix is empty. Adjust dates or universe.")
+        raise ValueError(
+            f"Empty returns for train {train_start}:{train_end} "
+            f"or test {test_start}:{test_end}."
+        )
 
-    # Ensure both windows use the exact same asset ordering.
     common_assets = train_matrix.columns.intersection(test_matrix.columns)
     if len(common_assets) == 0:
-        raise ValueError("No overlapping assets between train and test windows.")
+        raise ValueError(f"No overlapping assets for window ending {train_end}.")
     train_matrix = train_matrix[common_assets]
     test_matrix = test_matrix[common_assets]
 
-    # 2) Build model inputs (mu, Sigma, and previous weights).
+    w_prev_arr = _align_prev_weights(w_prev, common_assets)
     mu = compute_expected_returns(train_matrix)
     sigma = compute_covariance_matrix(train_matrix)
-    w_prev = generate_naive_equal_weight(len(common_assets))
 
-    # 3) Run optimizer.
     optimizer = FPSO(
         num_particles=30,
         num_assets=len(common_assets),
@@ -121,29 +151,117 @@ def main():
     optimizer.K = min(20, len(common_assets))
     optimizer.u = 0.15
 
-    best_weights, fitness_history = optimizer.optimize(mu, sigma, w_prev)
+    best_weights, _ = optimizer.optimize(mu, sigma, w_prev_arr)
+    turnover = _one_way_turnover(best_weights, w_prev_arr)
 
-    # 4) Evaluate on train and test windows.
     train_returns = train_matrix.to_numpy() @ best_weights
-    test_returns = test_matrix.to_numpy() @ best_weights
+    test_returns_gross = test_matrix.to_numpy() @ best_weights
+    w_star = pd.Series(best_weights, index=common_assets)
 
-    train_metrics = _compute_basic_metrics(train_returns)
-    test_metrics = _compute_basic_metrics(test_returns)
+    return {
+        "w_star": w_star,
+        "turnover": turnover,
+        "train_returns": train_returns,
+        "test_returns_gross": test_returns_gross,
+        "train_metrics": _compute_basic_metrics(train_returns),
+        "test_metrics_gross": _compute_basic_metrics(test_returns_gross),
+    }
 
-    # 5) Print a compact summary.
-    print("\n=== FPSO Backtest Summary ===")
-    print(f"Assets used: {len(common_assets)}")
-    print(f"Best fitness: {fitness_history[-1]:.6f}")
-    print(f"Weight sum: {np.sum(best_weights):.6f}")
-    print(f"Active positions: {int(np.sum(np.abs(best_weights) > 1e-8))}")
 
-    print("\nTrain metrics")
-    for key, value in train_metrics.items():
-        print(f"  {key}: {value:.6f}" if isinstance(value, float) else f"  {key}: {value}")
+def main():
+    # Full sample: 2010–2024 with rolling 12-month train → next-year hold.
+    sample_start_year = 2010
+    sample_end_year = 2024
+    num_assets = 50
+    # One-way proportional cost rates (same sweep style as the CNN-EF paper).
+    tc_rates = [0.0, 0.005, 0.01, 0.015]
 
-    print("\nTest metrics")
-    for key, value in test_metrics.items():
-        print(f"  {key}: {value:.6f}" if isinstance(value, float) else f"  {key}: {value}")
+    window_results: list[dict] = []
+    w_prev: pd.Series | None = None
+
+    print(
+        f"Starting rolling backtest: train {sample_start_year}–"
+        f"{sample_end_year - 1}, OOS {sample_start_year + 1}–{sample_end_year}",
+        flush=True,
+    )
+    db = create_wrds_connection()
+    try:
+        for train_year in range(sample_start_year, sample_end_year):
+            test_year = train_year + 1
+            train_start = f"{train_year}-01-01"
+            train_end = f"{train_year}-12-31"
+            test_start = f"{test_year}-01-01"
+            test_end = f"{test_year}-12-31"
+
+            print(
+                f"\nWindow: train {train_year} -> test {test_year} "
+                f"(universe as of {train_end})",
+                flush=True,
+            )
+            result = _run_window(
+                db,
+                train_start=train_start,
+                train_end=train_end,
+                test_start=test_start,
+                test_end=test_end,
+                num_assets=num_assets,
+                w_prev=w_prev,
+            )
+            window_results.append(
+                {
+                    "test_year": test_year,
+                    "turnover": result["turnover"],
+                    "test_returns_gross": result["test_returns_gross"],
+                    "test_metrics_gross": result["test_metrics_gross"],
+                }
+            )
+            # Next rebalance measures trading from this portfolio.
+            w_prev = result["w_star"]
+
+            print(
+                f"  gross OOS ann={result['test_metrics_gross']['annual_return']:.4f} | "
+                f"sharpe={result['test_metrics_gross']['sharpe']:.4f} | "
+                f"one-way TO={result['turnover']:.4f}",
+                flush=True,
+            )
+    finally:
+        db.close()
+
+    if not window_results:
+        raise ValueError("No completed rolling windows.")
+
+    print("\n=== FPSO Rolling Backtest Summary (2010–2024) ===")
+    print(f"Windows: {len(window_results)}")
+    print(f"OOS span: {sample_start_year + 1}–{sample_end_year}")
+    print(f"Assets per window (cap): {num_assets}")
+
+    print("\n--- Transaction-cost robustness ---")
+    print(
+        f"{'TC':>8} {'AnnRet':>10} {'AnnVol':>10} {'Sharpe':>10} {'MDD':>10} {'AvgTO':>10}"
+    )
+    for tc in tc_rates:
+        net_chunks = [
+            _apply_transaction_cost(row["test_returns_gross"], row["turnover"], tc)
+            for row in window_results
+        ]
+        metrics = _compute_basic_metrics(np.concatenate(net_chunks))
+        avg_to = float(np.mean([row["turnover"] for row in window_results]))
+        print(
+            f"{tc:8.1%} {metrics['annual_return']:10.4f} "
+            f"{metrics['annual_vol']:10.4f} {metrics['sharpe']:10.4f} "
+            f"{metrics['max_drawdown']:10.4f} {avg_to:10.4f}"
+        )
+
+    print("\nPer-window gross OOS (TC = 0)")
+    for row in window_results:
+        m = row["test_metrics_gross"]
+        print(
+            f"  {row['test_year']}: "
+            f"ann={m['annual_return']:.4f}, "
+            f"sharpe={m['sharpe']:.4f}, "
+            f"mdd={m['max_drawdown']:.4f}, "
+            f"TO={row['turnover']:.4f}"
+        )
 
 
 if __name__ == "__main__":

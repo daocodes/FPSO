@@ -2,7 +2,12 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
+from algorithm.firefly import firefly
+from algorithm.data_caller import get_data, normalize_wrds_data
 
+#takes the performance and plots the cumulative return of the strategy
+#random perturbation epsilon is adjusted each iteration (n=50 here) to give us a robust understanding
 
 def to_1d_array(result) -> np.ndarray:
     return np.asarray(result, dtype=float).reshape(-1)

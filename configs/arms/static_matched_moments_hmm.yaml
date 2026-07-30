@@ -1,0 +1,22 @@
+# TURNOVER-MATCHED CONTROL for `moments_hmm`.
+#
+# Plain static FPSO with its turnover penalty raised until it trades as much as
+# `moments_hmm` does. Solved by bisection on lambda_t against that arm's realized
+# turnover; see `python -m fpso.experiments.match_turnover`.
+#
+#   target turnover   : 0.1794  (from moments_hmm)
+#   achieved turnover : 0.1768
+#   solved lambda_t   : 0.07812  (baseline 0.01)
+#   solved_at         : 2026-07-30T19:26:40.216046+00:00
+#
+# This is a CONTROL, not a strategy. It is matched on turnover — a design
+# covariate taken from the treatment arm's trading, never from its performance —
+# so that the remaining difference between the two arms is attributable to the
+# regime signal alone. Describe it as a control wherever it appears.
+extends: ../base.yaml
+name: static_matched_moments_hmm
+base_params:
+  lambda_t: 0.07812
+regime:
+  detector: none
+  overrides: {}

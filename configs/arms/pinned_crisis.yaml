@@ -1,0 +1,10 @@
+# Diagnostic - the CRISIS parameter block applied at EVERY rebalance.
+#
+# The defensive parameterization (K=12, u=0.10, lambda_v=3.0) run unconditionally.
+# If this matches or beats regime_hmm, the mechanism's value is the defensive
+# configuration itself rather than any ability to detect when it is needed.
+extends: ../regime_policy.yaml
+name: pinned_crisis
+regime:
+  detector: constant
+  constant_label: CRISIS

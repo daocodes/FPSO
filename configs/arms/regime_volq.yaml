@@ -1,0 +1,7 @@
+# Arm 4 - ablation on learning. Volatility terciles instead of a fitted model.
+# Answers: does the learned detector beat a transparent rule a practitioner
+# would write in ten minutes?
+extends: ../regime_policy.yaml
+name: regime_volq
+regime:
+  detector: volq

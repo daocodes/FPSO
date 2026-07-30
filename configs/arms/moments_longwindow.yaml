@@ -1,0 +1,17 @@
+# CONTROL for mechanism 2. Flat sample covariance over the SAME five-year window
+# the regime-weighted estimator uses.
+#
+# Regime weighting reaches back five years because weighting discards the days
+# that do not match the current state. But a longer window is itself stabilising:
+# it produces a steadier Sigma, hence steadier weights, hence less turnover — and
+# turnover is where mechanism 2's advantage showed up in the probe. Without this
+# arm the paper could not tell "regime-conditioned beliefs help" apart from
+# "estimating covariance over five years instead of one helps".
+extends: ../base.yaml
+name: moments_longwindow
+moment_estimator: sample
+schedule:
+  estimation_window_days: 1260
+regime:
+  detector: none
+  overrides: {}

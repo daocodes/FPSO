@@ -1,0 +1,7 @@
+# Supporting ablation - annual rebalancing, the pre-refactor cadence. Reported as
+# a rebalance-frequency sensitivity so the change to monthly is a measured
+# result rather than an unexplained difference from earlier numbers.
+extends: ../base.yaml
+name: ablation_annual
+schedule:
+  frequency: annual

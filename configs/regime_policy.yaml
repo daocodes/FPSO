@@ -1,0 +1,48 @@
+# The regime -> parameter policy shared by every regime-conditioned arm.
+#
+# Only the `detector` differs between arms 2-6; the parameter map below is held
+# fixed across all of them. That is deliberate: if the shuffled control receives
+# a *different* parameter map from the HMM arm, the comparison stops being a test
+# of the regime signal and becomes a test of two parameter maps.
+#
+# PROVENANCE — the reviewer's first question is where these numbers came from.
+# They are set a priori from the economic reasoning below and were never tuned on
+# the 2011-2024 evaluation sample. `python -m fpso.experiments.calibrate_policy`
+# re-derives them by coordinate search on a 2005-2009 pre-sample holdout (which
+# contains the GFC, so all three regimes are represented) and writes
+# configs/regime_policy.frozen.yaml with a timestamp and git SHA. Point the arms
+# at that file to run the pre-sample-calibrated variant.
+
+extends: base.yaml
+name: regime_policy
+
+regime:
+  detector: hmm
+  overrides:
+    # Calm: exploit rather than explore, tolerate risk, and trade as little as
+    # possible. Diversify more widely because there is no crisis correlation to
+    # concentrate away from.
+    CALM:
+      alpha: 0.10          # smaller random walk  (base 0.20)
+      gamma: 0.60          # wider attraction     (base 1.00)
+      lambda_v: 0.60       # lighter risk penalty (base 1.00)
+      lambda_t: 0.03       # heavier turnover penalty (base 0.01)
+      max_assets: 25       # more names           (base 20)
+
+    # Turbulent: the landscape is moving, so explore harder and localize
+    # attraction; charge more for variance. Trading policy unchanged.
+    TURBULENT:
+      alpha: 0.30
+      gamma: 1.60
+      lambda_v: 1.60
+
+    # Crisis: penalize variance hardest, concentrate into fewer names under a
+    # tighter cap, and stop charging for turnover so the optimizer is free to
+    # move out of what is breaking.
+    CRISIS:
+      alpha: 0.35
+      gamma: 2.00
+      lambda_v: 3.00
+      lambda_t: 0.005
+      max_assets: 12       # 12 * 0.10 = 1.2 >= 1, so the constraint set stays feasible
+      max_weight: 0.10

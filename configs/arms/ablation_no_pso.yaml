@@ -1,0 +1,7 @@
+# Supporting ablation - pure firefly (pso_blend = 0), i.e. the algorithm as it
+# was implemented before this refactor. Isolates the contribution of the PSO
+# personal/global-best refinement term.
+extends: ../base.yaml
+name: ablation_no_pso
+base_params:
+  pso_blend: 0.0

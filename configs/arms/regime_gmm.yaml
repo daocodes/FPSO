@@ -1,0 +1,7 @@
+# Arm 3 - ablation on temporal structure. Same features, same parameter map, but
+# a Gaussian mixture with no Markov transition model. Answers: does modelling
+# regime *persistence* matter, or is marginal clustering of the features enough?
+extends: ../regime_policy.yaml
+name: regime_gmm
+regime:
+  detector: gmm

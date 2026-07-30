@@ -1,0 +1,7 @@
+# Both mechanisms at once: regime-weighted beliefs AND the regime parameter
+# policy. Reported to show whether the two compose or interfere.
+extends: ../regime_policy.yaml
+name: moments_hmm_policy
+moment_estimator: regime_weighted
+regime:
+  detector: hmm

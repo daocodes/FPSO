@@ -1,0 +1,7 @@
+# Arm 1 - static FPSO. One parameterization for all market states; the ablation
+# baseline that every regime arm is compared against.
+extends: ../base.yaml
+name: static
+regime:
+  detector: none
+  overrides: {}

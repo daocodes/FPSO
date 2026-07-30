@@ -1,0 +1,12 @@
+# Mechanism 2, causal: the HMM posterior weights the covariance estimate.
+#
+# The regime signal enters the optimizer's BELIEFS (which days inform Sigma)
+# rather than its PREFERENCES (how much it fears risk). The parameter policy is
+# off, so this arm measures the belief mechanism alone.
+extends: ../base.yaml
+name: moments_hmm
+moment_estimator: regime_weighted
+regime:
+  detector: hmm
+  burn_in_months: 36
+  overrides: {}

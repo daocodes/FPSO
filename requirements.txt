@@ -1,6 +1,14 @@
-wrds
-numpy
-pandas
-python-dotenv
-matplotlib
-pytest
+# Pinned for reproducibility. The versions here are the ones recorded in every
+# result manifest; loosening them can move numerical results.
+numpy==2.4.6
+pandas==2.2.3
+scipy==1.18.0
+scikit-learn==1.9.0
+hmmlearn==0.3.3            # Gaussian HMM regime detector
+vectorbt==0.28.5           # portfolio simulation, order/fee accounting
+pyarrow==25.0.0            # Parquet panel cache
+matplotlib==3.11.0
+PyYAML==6.0.3
+statsmodels==0.14.6
+python-dotenv==1.2.2
+wrds==3.5.0                # only needed to build the cache

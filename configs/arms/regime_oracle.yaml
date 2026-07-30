@@ -1,0 +1,7 @@
+# Arm 6 - UPPER BOUND, NOT A RESULT. The HMM is fitted on the full sample, so its
+# labels use future data. Reported only to bound how much perfect regime
+# knowledge could be worth, and labelled as lookahead everywhere it appears.
+extends: ../regime_policy.yaml
+name: regime_oracle
+regime:
+  detector: oracle

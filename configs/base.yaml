@@ -1,0 +1,77 @@
+# Shared settings for every arm of the regime-conditioned FPSO study.
+# Arm files in configs/arms/ extend this and override only what makes them
+# different, so the ablation matrix is auditable by reading the diffs.
+
+name: base
+optimizer: fpso
+
+# 30 matched seeds. The same seed drives the same rebalance dates in every arm,
+# which makes all cross-arm comparisons paired.
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+        10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+        20, 21, 22, 23, 24, 25, 26, 27, 28, 29]
+
+transaction_cost_rates: [0.0, 0.005, 0.01, 0.015]
+results_dir: results
+
+base_params:
+  num_particles: 30
+  max_iter: 60
+
+  # Firefly attraction
+  beta_0: 1.0
+  gamma: 1.0
+  alpha: 0.2
+  delta: 1.0e-6
+
+  # PSO refinement. pso_blend > 0 makes the paper's description of FPSO true of
+  # the code; the pure-firefly ablation sets it to 0.
+  inertia: 0.5
+  c_cognitive: 0.5
+  c_social: 0.5
+  pso_blend: 0.5
+
+  # Objective R(w) = mu'w - lambda_v * sd(w) - lambda_t * turnover
+  lambda_v: 1.0
+  lambda_t: 0.01
+
+  # Penalty weights. Repair makes these inactive along the search path; they are
+  # retained as a safety net and for the penalty-only ablation.
+  rho_budget: 100.0
+  rho_box: 100.0
+  rho_cardinality: 100.0
+
+  # Hard constraints: 20 names, 15% cap. 20 * 0.15 = 3.0 >= 1, so feasible.
+  max_assets: 20
+  max_weight: 0.15
+
+regime:
+  detector: none
+  n_states: 3
+  covariance_type: diag
+  features: [rv_21, rv_ratio, ret_63, dd_252]
+  refit_months: 12
+  min_dwell: 2
+  burn_in_months: 36
+  detector_seed: 0
+  overrides: {}
+
+schedule:
+  # Monthly, as the paper states. ~168 rebalances over the evaluation window,
+  # versus 14 under the previous annual cadence.
+  frequency: monthly
+  start: "2011-01-01"
+  end: "2024-12-31"
+  estimation_window_days: 252
+  min_observations: 120
+
+data:
+  source: parquet
+  cache_dir: cache
+  # The panel starts in 2005 so the 2011 evaluation window opens with a fully
+  # standardized feature history and a satisfied HMM burn-in.
+  panel_start: "2005-01-01"
+  panel_end: "2024-12-31"
+  universe_size: 50
+  universe_rule: top_market_cap
+  use_delisting_returns: true

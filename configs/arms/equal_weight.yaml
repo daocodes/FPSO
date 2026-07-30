@@ -1,0 +1,5 @@
+# Arm 7a - standard external baseline. Deterministic, so one seed suffices.
+extends: ../base.yaml
+name: equal_weight
+optimizer: equal_weight
+seeds: [0]

@@ -1,0 +1,5 @@
+# Arm 2 - HEADLINE. Gaussian HMM regime detection driving the parameter policy.
+extends: ../regime_policy.yaml
+name: regime_hmm
+regime:
+  detector: hmm

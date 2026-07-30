@@ -1,0 +1,12 @@
+# Diagnostic - the CALM parameter block applied at EVERY rebalance.
+#
+# Separates the two things regime conditioning could be doing: applying a better
+# parameter *level*, or applying it at the right *time*. Burn-in, parameter map,
+# schedule and seeds are identical to regime_hmm; only the label is pinned. So:
+#   pinned_calm vs. static      -> what the CALM parameter level is worth
+#   regime_hmm  vs. pinned_calm -> what the regime TIMING is worth on top of it
+extends: ../regime_policy.yaml
+name: pinned_calm
+regime:
+  detector: constant
+  constant_label: CALM

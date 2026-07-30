@@ -1,0 +1,33 @@
+# FROZEN regime -> parameter policy.
+#
+# Produced by `python -m fpso.experiments.calibrate_policy` via coordinate
+# search on the 2008-01-01 .. 2010-12-31 pre-sample holdout. The
+# 2011-2024 evaluation sample was NOT used to select any value below.
+#
+# frozen_at : 2026-07-29T21:57:45.149446+00:00
+# git_sha   : a1ea5ce0732ec5381bc3428b7cd5dea9aa1d8872
+#
+# Do not hand-edit. Re-run the calibration and commit the new file, so the
+# freeze stays auditable.
+extends: base.yaml
+name: regime_policy_frozen
+regime:
+  detector: hmm
+  overrides:
+    CALM:
+      alpha: 0.05
+      gamma: 0.6
+      lambda_v: 0.6
+      lambda_t: 0.03
+      max_assets: 20
+    TURBULENT:
+      alpha: 0.3
+      gamma: 1.6
+      lambda_v: 1.6
+    CRISIS:
+      alpha: 0.35
+      gamma: 2.0
+      lambda_v: 4.0
+      lambda_t: 0.005
+      max_assets: 12
+      max_weight: 0.1

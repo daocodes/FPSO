@@ -1,0 +1,8 @@
+# Arm 5 - FALSIFICATION. Labels with the HMM's marginal frequencies and dwell
+# structure but statistically independent of the market. Identical parameter
+# variation, zero signal. If arm 2 does not beat this, the mechanism is
+# parameter jitter and the paper must report that.
+extends: ../regime_policy.yaml
+name: regime_shuffled
+regime:
+  detector: shuffled

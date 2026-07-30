@@ -1,0 +1,10 @@
+# Falsification control for mechanism 2. Same weighting machinery, but the
+# posterior comes from an episode-permuted label path carrying no information
+# about the current market state.
+extends: ../base.yaml
+name: moments_shuffled
+moment_estimator: regime_weighted
+regime:
+  detector: shuffled
+  burn_in_months: 36
+  overrides: {}

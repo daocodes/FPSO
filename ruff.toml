@@ -1,0 +1,10 @@
+# Lint configuration for the artifact release.
+line-length = 100
+target-version = "py313"
+
+[lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[lint.per-file-ignores]
+# Figure code reads better with the plotting call laid out on one line.
+"fpso/evaluation/figures.py" = ["E501"]

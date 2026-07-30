@@ -1,0 +1,16 @@
+# GO / NO-GO PROBE for mechanism 2 (regime-conditioned beliefs).
+#
+# Regime-weighted covariance driven by FULL-SAMPLE (lookahead) regime labels.
+# This is the ceiling: if perfect regime knowledge cannot make a regime-weighted
+# covariance beat the flat one, the regime idea is dead for this dataset and no
+# causal variant can rescue it. Run this FIRST, before building out the matrix.
+#
+# The parameter policy is deliberately OFF (overrides: {}), so this arm isolates
+# the belief mechanism from the preference mechanism that already failed.
+extends: ../base.yaml
+name: moments_oracle
+moment_estimator: regime_weighted
+regime:
+  detector: oracle
+  burn_in_months: 36
+  overrides: {}

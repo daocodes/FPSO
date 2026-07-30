@@ -1,0 +1,5 @@
+# Arm 7b - standard external baseline under the same hard constraints as FPSO.
+extends: ../base.yaml
+name: min_variance
+optimizer: min_variance
+seeds: [0]

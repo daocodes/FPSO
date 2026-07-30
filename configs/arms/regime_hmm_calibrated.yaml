@@ -1,0 +1,16 @@
+# Sensitivity arm - the headline mechanism under the PRE-SAMPLE CALIBRATED
+# parameter map instead of the a-priori one.
+#
+# The shipped headline (regime_hmm) uses the a-priori map in
+# configs/regime_policy.yaml: values set from economic reasoning, never fitted to
+# anything. This arm uses configs/regime_policy.frozen.yaml, produced by
+# coordinate search on the 2008-2010 pre-sample holdout and frozen before the
+# evaluation window was touched.
+#
+# Running both is the point. If the conclusion survives the choice of parameter
+# map, the result does not hinge on how those twelve numbers were picked -- which
+# is the question a reviewer would otherwise have to take on trust.
+extends: ../regime_policy.frozen.yaml
+name: regime_hmm_calibrated
+regime:
+  detector: hmm

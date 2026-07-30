@@ -1,1 +1,9 @@
 .env
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# macOS
+.DS_Store

@@ -1,16 +1,16 @@
 # Findings
 
-**Study:** Regime-Conditioned FPSO — ICAIF '26
+**Study:** Regime Effects Are Turnover Effects — ICAIF '26
 **Evaluation window:** 2011-01 to 2024-12, CRSP daily, monthly rebalancing (168 decisions)
-**Matrix:** 20 arms x 30 matched seeds (deterministic baselines at 1 seed), 4 transaction-cost levels
-**Status:** experiments complete; paper not yet rewritten around these results
+**Matrix:** 32 arms x 30 matched seeds (deterministic baselines at 1 seed), 4 transaction-cost levels
+**Status:** experiments complete; manuscript written around these results
 
 ---
 
 ## 1. The headline
 
-> **Hold turnover fixed and the regime effect disappears — at both injection
-> points, at every transaction-cost level.**
+> **Hold turnover fixed and the regime effect disappears — at all three
+> injection points, at every transaction-cost level.**
 >
 > Against plain `static`, regime conditioning looks increasingly good as costs
 > rise (+0.113 Sharpe at 1.5% for mechanism 1, +0.388 for mechanism 2). Against a

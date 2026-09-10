@@ -1,20 +1,11 @@
 # Regime Effects Are Turnover Effects
 
+Original Motivation: This paper was supposed to be the introduction of a novel Firefly Portfolio Swarm Optimization for Portfolio Optimization that also incorporated Regime Classification. We determined in the results that Regime Classification actually has its drawbacks and we decided to move the paper in that direction.
+
 Research code for a controlled evaluation of regime-conditioned portfolio
 optimization, submitted to ICAIF '26.
 
-A large literature reports that conditioning portfolio allocation on an inferred
-market regime improves risk-adjusted performance, particularly net of transaction
-costs. This study finds that in a cardinality-constrained US equity setting the
-measured effect is explained by a variable the mechanism was never designed to
-control: how much the resulting portfolio trades.
-
-A hidden Markov posterior is persistent, so a strategy reading its allocation off
-that posterior holds roughly the same portfolio for months. It therefore trades
-less than an unconditional strategy — whether or not the signal knows anything
-about the market. Trading less means paying less in transaction costs. When
-performance is reported net of costs, turnover and conditioning are confounded by
-construction, and nothing in the standard comparison separates them.
+Accepted to IOCRF '26
 
 ## Result
 

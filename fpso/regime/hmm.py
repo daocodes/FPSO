@@ -194,8 +194,10 @@ class GaussianHMMDetector(RegimeDetector):
     def label_series(self, features: pd.DataFrame, as_of: pd.Timestamp) -> pd.Series:
         """Smoothed (Viterbi) label path through `as_of`, for plotting only.
 
-        This uses the whole sliced history to label each date, which is fine for a
-        *figure* but must never feed a decision. The backtest engine never calls it.
+        This uses the whole sliced history to label each date, so it must never feed
+        a decision on any causally valid arm. Two callers are permitted: figures,
+        and `OracleOOSDetector`, whose entire purpose is to be acausal and which is
+        reported only as an upper bound.
         """
         history = self._causal_slice(features, as_of)
         if self._model is None or history.empty:

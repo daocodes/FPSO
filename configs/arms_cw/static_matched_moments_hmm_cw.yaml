@@ -1,0 +1,15 @@
+# TURNOVER-MATCHED CONTROL for `moments_hmm_cw`, under FPSO-CW.
+#
+#   target turnover   : 0.0958
+#   achieved turnover : 0.0975
+#   solved lambda_t   : 0.12500  (baseline 0.01)
+#
+# A control, not a strategy: matched on turnover, never on performance.
+extends: ../base.yaml
+name: static_matched_moments_hmm_cw
+optimizer: fpso_cw
+base_params:
+  lambda_t: 0.12500
+regime:
+  detector: none
+  overrides: {}

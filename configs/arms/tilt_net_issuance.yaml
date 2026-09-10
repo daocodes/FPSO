@@ -1,0 +1,26 @@
+# EXOGENOUS-INFORMATION arm: tilt driven by net_issuance.
+#
+# The first mechanism in this study fed by something outside the return panel.
+# Every earlier injection point was built from returns, and so are mu and Sigma —
+# re-deriving one from the other rearranges information without adding any, which
+# is why perfect regime knowledge was worth ~0.01 Sharpe at three separate
+# injection points.
+#
+# net_issuance is invisible to a return series: identical return paths are consistent
+# with any share count or firm size. Measured on this panel, net issuance
+# correlates with trailing returns at +0.11 — near-orthogonal, which is what
+# makes it worth testing.
+#
+# Whether it *predicts* anything is the open question. Unlike the earlier
+# mechanisms, it is at least not ruled out by construction.
+extends: ../base.yaml
+name: tilt_net_issuance
+moment_estimator: regime_tilt
+tilt_scorer: net_issuance
+tilt_strength:
+  CALM: 0.0
+  TURBULENT: 0.5
+  CRISIS: 1.0
+regime:
+  detector: hmm
+  overrides: {}

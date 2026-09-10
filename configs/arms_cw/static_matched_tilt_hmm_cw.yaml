@@ -1,0 +1,15 @@
+# TURNOVER-MATCHED CONTROL for `tilt_hmm_cw`, under FPSO-CW.
+#
+#   target turnover   : 0.1169
+#   achieved turnover : 0.1186
+#   solved lambda_t   : 0.09766  (baseline 0.01)
+#
+# A control, not a strategy: matched on turnover, never on performance.
+extends: ../base.yaml
+name: static_matched_tilt_hmm_cw
+optimizer: fpso_cw
+base_params:
+  lambda_t: 0.09766
+regime:
+  detector: none
+  overrides: {}

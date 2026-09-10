@@ -66,7 +66,7 @@ class EqualWeightAllocator(_ConstrainedAllocator):
 
     name = "equal_weight"
 
-    def solve(self, moments, weights_prev, rng) -> OptimizationResult:
+    def solve(self, moments, weights_prev, rng, seeds=None) -> OptimizationResult:
         started = time.perf_counter()
         n_assets = len(moments.assets)
         k = min(self.params.max_assets, n_assets)
@@ -99,7 +99,7 @@ class MinimumVarianceAllocator(_ConstrainedAllocator):
         self.max_iter = max_iter
         self.step_size = step_size
 
-    def solve(self, moments, weights_prev, rng) -> OptimizationResult:
+    def solve(self, moments, weights_prev, rng, seeds=None) -> OptimizationResult:
         started = time.perf_counter()
         n_assets = len(moments.assets)
         repair = self._repair_for(n_assets)
@@ -117,6 +117,45 @@ class MinimumVarianceAllocator(_ConstrainedAllocator):
                 break
             weights = candidate
 
+        return OptimizationResult(
+            weights=weights,
+            objective_value=self._score(weights, moments, weights_prev),
+            solve_seconds=time.perf_counter() - started,
+        )
+
+
+class LowVolatilityAllocator(_ConstrainedAllocator):
+    """Equal weight over the `max_assets` lowest-volatility names. No optimization.
+
+    The confound control for the expected-return tilt. `tilt_constant` — a
+    permanent defensive tilt with no regime conditioning — is the best net-of-cost
+    arm in the study, and a permanent defensive tilt is close to a low-volatility
+    screen. Low-vol is a large documented anomaly with its own literature, so
+    without this arm the honest reading of that result would be "we rebuilt low-vol
+    investing out of a regime detector and an optimizer".
+
+    Deliberately the crudest thing that could work: rank by trailing volatility,
+    hold the lowest K equally, rebalance monthly. No mu, no covariance structure,
+    no search. If this matches the tilt arms, then neither the tilt machinery nor
+    FPSO is contributing and the effect belongs to the screen.
+
+    Same failure shape as `moments_longwindow`, which showed the covariance
+    mechanism's entire effect was its estimation window.
+    """
+
+    name = "low_volatility"
+
+    def solve(self, moments, weights_prev, rng, seeds=None) -> OptimizationResult:
+        started = time.perf_counter()
+        n_assets = len(moments.assets)
+        k = min(self.params.max_assets, n_assets)
+
+        volatility = np.sqrt(np.clip(np.diag(moments.sigma), 0.0, None))
+        selected = np.argsort(volatility)[:k]
+        raw = np.zeros(n_assets)
+        raw[selected] = 1.0
+
+        weights = self._repair_for(n_assets).repair(raw)
         return OptimizationResult(
             weights=weights,
             objective_value=self._score(weights, moments, weights_prev),

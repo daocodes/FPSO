@@ -1,0 +1,20 @@
+# LOOKAHEAD UPPER BOUND for `tilt_hmm`.
+#
+# The detector is fitted on the full sample and its labels revealed to the policy,
+# so the tilt fires with perfect knowledge of the state. Causally invalid by
+# construction and reported only as a ceiling: it answers "what is the most this
+# mechanism could deliver if the detector were perfect?"
+#
+# For the two earlier mechanisms the oracle bought nothing, which is what showed
+# the injection point rather than label quality was binding. If that repeats here,
+# no better detector — and no RL layer learning one — can rescue the mechanism.
+extends: ../base.yaml
+name: tilt_oracle
+moment_estimator: regime_tilt
+tilt_strength:
+  CALM: 0.0
+  TURBULENT: 0.5
+  CRISIS: 1.0
+regime:
+  detector: oracle
+  overrides: {}

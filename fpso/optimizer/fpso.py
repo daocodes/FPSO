@@ -21,6 +21,7 @@ beta(r) = beta_0 * exp(-gamma r^2), p_i is i's personal best and g the swarm bes
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 
 import numpy as np
 
@@ -77,16 +78,26 @@ class Swarm:
         repair: SimplexBoxCardinalityRepair,
         weights_prev: np.ndarray,
         rng: np.random.Generator,
+        seeds: Sequence[np.ndarray] | None = None,
     ) -> Swarm:
-        """Seed the swarm with the incumbent portfolio plus Dirichlet draws.
+        """Seed the swarm with the incumbent portfolio, any supplied seeds, then
+        Dirichlet draws for the remaining slots.
 
         Including `weights_prev` as particle 0 warm-starts the search from the
         portfolio actually held. Without it the optimizer would have to rediscover
         a good allocation from scratch every month and the turnover term would be
         fighting an arbitrary starting point.
+
+        `seeds` are additional starting points chosen by the caller. The optimizer
+        attaches no meaning to them: they are weight vectors, repaired like any
+        other candidate. This is what keeps the regime mechanism separable — the
+        archive decides *which* portfolios are promising, and the search never
+        learns why.
         """
         particles = [Particle(repair.repair(weights_prev))]
-        for _ in range(n_particles - 1):
+        for seed in (seeds or ())[: max(0, n_particles - 1)]:
+            particles.append(Particle(repair.repair(np.asarray(seed, dtype=float))))
+        while len(particles) < n_particles:
             particles.append(Particle(repair.repair(rng.dirichlet(np.ones(n_assets)))))
         return cls(particles)
 
@@ -127,6 +138,7 @@ class FPSOOptimizer(PortfolioOptimizer):
         moments: Moments,
         weights_prev: np.ndarray,
         rng: np.random.Generator,
+        seeds: Sequence[np.ndarray] | None = None,
     ) -> OptimizationResult:
         started = time.perf_counter()
         n_assets = len(moments.assets)
@@ -155,6 +167,7 @@ class FPSOOptimizer(PortfolioOptimizer):
             repair=repair,
             weights_prev=weights_prev,
             rng=rng,
+            seeds=seeds,
         )
         for particle in swarm.particles:
             particle.record_fitness(objective.score(particle.weights))
@@ -175,6 +188,8 @@ class FPSOOptimizer(PortfolioOptimizer):
             objective_value=swarm.best_fitness,
             convergence=convergence,
             solve_seconds=time.perf_counter() - started,
+            population=np.array([p.weights for p in swarm.particles]),
+            population_fitness=np.array([p.fitness for p in swarm.particles]),
         )
 
     def _move(

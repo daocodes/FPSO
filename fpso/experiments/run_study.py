@@ -21,29 +21,26 @@ from fpso.experiments.runner import run_matrix
 
 ARM_DIR = Path("configs/arms")
 
-DEFAULT_ARMS = (
-    # The experiment matrix proper.
-    "static",
-    "regime_hmm",
-    "regime_gmm",
-    "regime_volq",
-    "regime_shuffled",
-    "regime_oracle",
-    "equal_weight",
-    "min_variance",
-    # Supporting ablations: the algorithm and the cadence as they were before
-    # this refactor, so both changes are measured rather than asserted.
-    "ablation_no_pso",
-    "ablation_annual",
-    # Sensitivity: the headline mechanism under the pre-sample-calibrated
-    # parameter map rather than the a-priori one.
-    "regime_hmm_calibrated",
-)
+def discover_arms(arm_dir: Path = ARM_DIR) -> list[str]:
+    """Every arm config on disk, sorted.
+
+    Derived from the directory rather than hardcoded. A hardcoded list was used
+    here previously and went stale: the mechanism-2 (`moments_*`), pinned, and
+    turnover-matched arms were added afterwards and were silently excluded, so
+    the documented "run everything" command reproduced 11 of 20 arms and omitted
+    the ones carrying the study's headline result. Discovery cannot drift from
+    the configs that define the matrix.
+    """
+    return sorted(p.stem for p in arm_dir.glob("*.yaml"))
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    """Run the matrix. `argv` defaults to the process arguments; passing it
+    explicitly lets callers such as
+    :mod:`fpso.experiments.verify_reproduction` drive the same entry point the
+    CLI uses, rather than a parallel code path that could drift from it."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--arms", nargs="*", default=list(DEFAULT_ARMS))
+    parser.add_argument("--arms", nargs="*", default=None)
     parser.add_argument("--config-dir", default=str(ARM_DIR))
     parser.add_argument("--results", default=None, help="Override results_dir.")
     parser.add_argument("--seeds", type=int, default=None, help="Use only the first N seeds.")
@@ -53,9 +50,12 @@ def main() -> None:
         action="store_true",
         help="Small swarm and short schedule, for verifying the pipeline runs.",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
-    paths = [Path(args.config_dir) / f"{arm}.yaml" for arm in args.arms]
+    arms = args.arms if args.arms else discover_arms(Path(args.config_dir))
+    if not arms:
+        raise FileNotFoundError(f"No arm configs found in {args.config_dir}")
+    paths = [Path(args.config_dir) / f"{arm}.yaml" for arm in arms]
     missing = [p for p in paths if not p.exists()]
     if missing:
         raise FileNotFoundError(f"Missing arm config(s): {missing}")

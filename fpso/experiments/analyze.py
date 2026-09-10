@@ -22,6 +22,7 @@ import pandas as pd
 
 from fpso.backtest.results import ArmResult, BacktestResult
 from fpso.evaluation import figures as fig
+from fpso.evaluation.conviction import conviction_profile, inclusion_frequency
 from fpso.evaluation.metrics import metrics_table, summarize, summarize_by_regime
 from fpso.evaluation.statistics import (
     StationaryBootstrap,
@@ -104,9 +105,19 @@ def comparison_table(
             continue
         treatment = arm.mean_returns(cost)
 
-        sharpe = bootstrap.paired_sharpe_difference(treatment, control)
-        drawdown = bootstrap.paired_statistic(treatment, control, max_drawdown_statistic)
-        volatility = bootstrap.paired_statistic(treatment, control, volatility_statistic)
+        # Keyed by arm and statistic so each interval has its own fixed stream and
+        # does not depend on where the arm falls in the iteration order.
+        sharpe = bootstrap.paired_sharpe_difference(
+            treatment, control, key=f"{name}|{baseline}|sharpe|{cost}"
+        )
+        drawdown = bootstrap.paired_statistic(
+            treatment, control, max_drawdown_statistic,
+            key=f"{name}|{baseline}|drawdown|{cost}",
+        )
+        volatility = bootstrap.paired_statistic(
+            treatment, control, volatility_statistic,
+            key=f"{name}|{baseline}|volatility|{cost}",
+        )
         lw_difference, lw_p = ledoit_wolf_sharpe_test(treatment, control)
 
         raw_p_values[name] = sharpe.p_value
@@ -200,15 +211,137 @@ def build_figures(
     matched = _turnover_matched_panels(arms)
     if matched:
         paths.append(fig.plot_turnover_matched_comparison(matched, figure_dir))
+
+    seeds, effects = _noise_floor(arms, cost)
+    if seeds is not None:
+        paths.append(
+            fig.plot_noise_floor(seeds, effects, figure_dir, cost_label=f"{cost:.1%}")
+        )
+
+    conviction = _conviction(arms)
+    if conviction is not None:
+        frequency, profile = conviction
+        paths.append(fig.plot_conviction(frequency, profile, figure_dir))
+
+    # A schematic, so it depends on no result and is always emitted.
+    paths.append(fig.plot_injection_points(figure_dir))
     return paths
+
+
+def _conviction(arms: dict[str, ArmResult]):
+    """Inclusion frequency and its profile for the baseline arm, or None.
+
+    Measured on the unconditional arm so the result describes the optimizer
+    rather than any mechanism layered on top of it.
+    """
+    baseline = arms.get(BASELINE_ARM)
+    if baseline is None or len(baseline.runs) < 2:
+        return None
+    frequency = inclusion_frequency(
+        {run.seed: run.target_weights for run in baseline.runs}
+    )
+    return frequency, conviction_profile(frequency)
+
+
+# The comparisons the paper reports, drawn against the baseline arm's own seed
+# spread in F10. Chosen to span the study: one arm per injection point, the
+# decisive control, and the algorithmic ablation.
+NOISE_FLOOR_EFFECTS = (
+    ("Regime preferences", "regime_hmm"),
+    ("Regime beliefs", "moments_hmm"),
+    ("Regime expected returns", "tilt_hmm"),
+    ("Turnover-matched control", "static_matched_regime_hmm"),
+    ("PSO-term ablation", "ablation_no_pso"),
+)
+
+
+def _noise_floor(
+    arms: dict[str, ArmResult], cost: float
+) -> tuple[pd.Series | None, pd.Series]:
+    """Per-seed Sharpe of the baseline arm, and each effect measured against it.
+
+    The seed spread is computed on the baseline alone — deliberately, because the
+    claim is about the dispersion of the *instrument*, not about any treatment. A
+    reader who doubts an effect should be able to ask what the same arm does when
+    only the seed changes, and F10 is that question answered on one axis.
+    """
+    baseline = arms.get(BASELINE_ARM)
+    if baseline is None or len(baseline.runs) < 2:
+        return None, pd.Series(dtype=float)
+
+    per_seed = pd.Series({
+        run.seed: summarize(run.returns(cost)).sharpe for run in baseline.runs
+    }).sort_index()
+    reference = summarize(baseline.mean_returns(cost)).sharpe
+
+    effects = {}
+    for label, arm_name in NOISE_FLOOR_EFFECTS:
+        arm = arms.get(arm_name)
+        if arm is None:
+            continue
+        effects[label] = summarize(arm.mean_returns(cost)).sharpe - reference
+    return per_seed, pd.Series(effects)
 
 
 # Each mechanism paired with the static arm whose turnover penalty was solved to
 # match it. See fpso.experiments.match_turnover.
+#
+# The three entries are the three points at which a market-state signal can enter
+# a mean-variance optimizer: its preferences (the objective's weights), its
+# beliefs (Sigma), and its forecasts (mu). Together they exhaust the injection
+# points, which is what lets the paper make a claim about regime conditioning
+# rather than about one implementation of it.
 MATCHED_PAIRS = (
-    ("Regime-conditioned preferences", "regime_hmm", "static_matched_regime_hmm"),
-    ("Regime-conditioned beliefs", "moments_hmm", "static_matched_moments_hmm"),
+    ("Preferences", "regime_hmm", "static_matched_regime_hmm"),
+    ("Beliefs", "moments_hmm", "static_matched_moments_hmm"),
+    ("Expected returns", "tilt_hmm", "static_matched_tilt_hmm"),
 )
+
+
+def turnover_matched_table(
+    arms: dict[str, ArmResult], n_resamples: int = 5000
+) -> pd.DataFrame | None:
+    """The paper's Table 2: each mechanism against its turnover-matched control.
+
+    This is the study's decisive comparison, so it is emitted as a table rather
+    than living only inside figure F9 — every number quoted in the paper should
+    be regenerable from `paper/tables/`, and this one previously was not.
+
+    Reported at every cost level, because the argument is about the *shape* of
+    the effect across costs, not its level at any single one.
+    """
+    rows = {}
+    bootstrap = StationaryBootstrap(n_resamples=n_resamples)
+    for label, treatment_arm, matched_arm in MATCHED_PAIRS:
+        if not {treatment_arm, matched_arm} <= set(arms):
+            continue
+        treat, matched = arms[treatment_arm], arms[matched_arm]
+        for cost in sorted(treat.runs[0].returns_by_cost):
+            if cost not in matched.runs[0].returns_by_cost:
+                continue
+            key = f"{treatment_arm}|{matched_arm}|sharpe|{cost}"
+            interval = bootstrap.paired_sharpe_difference(
+                treat.mean_returns(cost), matched.mean_returns(cost), key=key
+            )
+            _, lw_p = ledoit_wolf_sharpe_test(
+                treat.mean_returns(cost), matched.mean_returns(cost)
+            )
+            rows[(label, cost)] = {
+                "treatment": treatment_arm,
+                "matched_control": matched_arm,
+                "turnover_treatment": treat.mean_turnover,
+                "turnover_control": matched.mean_turnover,
+                "regime_effect": interval.statistic,
+                "ci_lo": interval.lower,
+                "ci_hi": interval.upper,
+                "p_bootstrap": interval.p_value,
+                "p_ledoit_wolf": lw_p,
+            }
+    if not rows:
+        return None
+    table = pd.DataFrame(rows).T
+    table.index.names = ["mechanism", "transaction_cost"]
+    return table
 
 
 def _turnover_matched_panels(arms: dict[str, ArmResult]):
@@ -253,9 +386,15 @@ def _turnover_vs_effect(arms: dict[str, ArmResult]):
     return turnover, effect
 
 
-# The four arms F7 contrasts: the baseline, one arm per mechanism, and the
+# The arms F7 contrasts: the baseline, one arm per injection point, and the
 # control that separates mechanism 2's regime weighting from its longer window.
-MECHANISM_ARMS = (BASELINE_ARM, "regime_hmm", "moments_hmm", "moments_longwindow")
+MECHANISM_ARMS = (
+    BASELINE_ARM,
+    "regime_hmm",
+    "moments_hmm",
+    "moments_longwindow",
+    "tilt_hmm",
+)
 
 
 def _mechanism_comparison(arms: dict[str, ArmResult]):
@@ -340,6 +479,11 @@ def main() -> None:
 
     cost_sweep = cost_sensitivity_table(arms)
     cost_sweep.to_csv(table_dir / "cost_sensitivity.csv")
+
+    matched = turnover_matched_table(arms, n_resamples=args.bootstrap_resamples)
+    if matched is not None:
+        matched.to_csv(table_dir / "turnover_matched.csv")
+        print(f"\n=== Regime effect vs. turnover-matched control ===\n{matched.round(4)}")
 
     market = _load_market(args.cache_dir, arms)
     paths = build_figures(arms, market, args.cost, Path(args.figures), comparisons)

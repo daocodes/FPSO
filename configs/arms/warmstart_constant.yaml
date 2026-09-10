@@ -1,0 +1,17 @@
+# NO-REGIME CONTROL for `warmstart_hmm`.
+#
+# One archive for the whole backtest — every solution stored and retrieved under
+# a single pinned label, so the search is warm-started from past solutions with
+# no state conditioning whatsoever.
+#
+# Separates "reusing past solutions helps" from "reusing *state-matched* past
+# solutions helps". `warmstart_hmm` must beat this arm for the regime to be
+# earning its place, exactly as `moments_longwindow` had to be beaten before the
+# covariance mechanism could claim anything.
+extends: ../base.yaml
+name: warmstart_constant
+regime:
+  detector: constant
+  constant_label: CALM
+  archive_seeds: 8
+  overrides: {}

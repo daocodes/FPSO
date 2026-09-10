@@ -37,8 +37,9 @@ from fpso.data.moments import EstimationContext, build_moment_estimator
 from fpso.data.panel import ReturnPanel
 from fpso.data.universe import build_universe_provider
 from fpso.optimizer import build_optimizer
-from fpso.optimizer.base import PortfolioOptimizer
+from fpso.optimizer.base import PortfolioOptimizer, iterations_to_converge
 from fpso.regime import RegimeFeatureBuilder, build_detector
+from fpso.regime.archive import RegimeSolutionArchive
 from fpso.regime.policy import RegimeParameterPolicy
 
 # Fields recorded per rebalance. The regime-conditioned subset is what the paper
@@ -59,10 +60,25 @@ class RollingBacktestEngine:
         self.schedule = build_schedule(config.schedule.frequency)
         self.universe_provider = build_universe_provider(config.data, panel)
         self.moment_estimator = build_moment_estimator(
-            config.moment_estimator, config.schedule.min_observations
+            config.moment_estimator,
+            config.schedule.min_observations,
+            tilt_strength=dict(config.tilt_strength),
+            scorer=config.tilt_scorer,
+            market_cap=panel.market_cap,
         )
         self.feature_builder = RegimeFeatureBuilder(features=config.regime.features)
         self.features = self.feature_builder.build(panel.market)
+
+        # Search acceleration: past solutions, keyed by the state they were found
+        # in, reused as starting points. Held per engine so it is rebuilt for each
+        # seed and can only ever contain solutions from earlier in that same run.
+        self.archive_seeds = config.regime.archive_seeds
+        self.archive_mode = config.regime.archive_mode
+        self.archive = (
+            RegimeSolutionArchive(capacity=config.regime.archive_capacity)
+            if self.archive_seeds > 0
+            else None
+        )
 
     def run(self, seed: int) -> BacktestResult:
         """Decide, then simulate: the full backtest for one seed."""
@@ -100,6 +116,8 @@ class RollingBacktestEngine:
                 holdings=holdings,
                 rng=streams.rebalance_rng(as_of),
                 context=self._estimation_context(policy, decision, as_of),
+                archive_state=None if decision.assignment.is_burn_in
+                else decision.assignment.label,
             )
             if outcome is None:
                 continue
@@ -125,6 +143,7 @@ class RollingBacktestEngine:
                     n_active=result.n_active,
                     objective_value=result.objective_value,
                     solve_seconds=result.solve_seconds,
+                    iters_to_converge=iterations_to_converge(result.convergence),
                     params={k: getattr(decision.params, k) for k in RECORDED_PARAMS},
                 )
             )
@@ -155,6 +174,7 @@ class RollingBacktestEngine:
         holdings: pd.Series,
         rng: np.random.Generator,
         context=None,
+        archive_state: str | None = None,
     ):
         """Optimize at one date, or return None when the window is unusable."""
         universe = self.universe_provider.at(as_of)
@@ -189,8 +209,24 @@ class RollingBacktestEngine:
         if weights_prev.sum() <= 1e-12:
             weights_prev = np.full(len(moments.assets), 1.0 / len(moments.assets))
 
-        result = acting_optimizer.solve(moments, weights_prev, rng)
-        return pd.Series(result.weights, index=moments.assets), result
+        # The archive supplies extra starting points for the state we are in. It
+        # is consulted here, outside the optimizer, so the search receives weight
+        # vectors and never learns that regimes exist.
+        seeds = (
+            self.archive.seeds_for(
+                archive_state, moments.assets, self.archive_seeds,
+                weights_prev=weights_prev, mode=self.archive_mode,
+            )
+            if self.archive is not None and archive_state is not None
+            else None
+        )
+
+        result = acting_optimizer.solve(moments, weights_prev, rng, seeds=seeds)
+        weights = pd.Series(result.weights, index=moments.assets)
+
+        if self.archive is not None and archive_state is not None:
+            self.archive.record(archive_state, weights, result.objective_value)
+        return weights, result
 
     def _estimation_context(self, policy, decision, as_of: pd.Timestamp):
         """Regime posteriors for the moment estimator, or None if it wants none.

@@ -1,0 +1,16 @@
+# CONFOUND CONTROL for the expected-return tilt arms.
+#
+# Equal weight over the 20 lowest-volatility names, rebalanced monthly. No regime
+# detector, no tilt, no optimizer — a naive low-volatility screen and nothing else.
+#
+# `tilt_constant` (a permanent defensive tilt, no regime conditioning) is the best
+# net-of-cost arm in the study. A permanent defensive tilt is close to a low-vol
+# screen, and low-vol is a documented anomaly. This arm decides whether the tilt
+# machinery and FPSO contribute anything beyond the screen itself.
+extends: ../base.yaml
+name: lowvol_screen
+optimizer: low_volatility
+seeds: [0]
+regime:
+  detector: none
+  overrides: {}

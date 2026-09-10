@@ -1,0 +1,11 @@
+# FPSO-CW twin of `static`. Identical in every respect except that the
+# weighting sub-problem is solved exactly on the swarm's support.
+# Arm 1 - static FPSO. One parameterization for all market states; the ablation
+# baseline that every regime arm is compared against.
+extends: ../base.yaml
+name: static_cw
+regime:
+  detector: none
+  overrides: {}
+
+optimizer: fpso_cw

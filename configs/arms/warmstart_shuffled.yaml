@@ -1,0 +1,15 @@
+# SIGNAL-FREE CONTROL for `warmstart_hmm`.
+#
+# Identical archive, identical seed count, but the state labels have had their
+# episodes permuted — marginals and dwell times preserved exactly, timing
+# destroyed. Seeds are therefore drawn from a *mislabelled* state's archive.
+#
+# This is the arm that decides whether the regime signal matters. If the archive
+# accelerates the search just as well when it is keyed by the wrong state, then
+# what helps is reusing past solutions at all, and the regime is decorative.
+extends: ../base.yaml
+name: warmstart_shuffled
+regime:
+  detector: shuffled
+  archive_seeds: 8
+  overrides: {}

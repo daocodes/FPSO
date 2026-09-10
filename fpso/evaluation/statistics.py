@@ -21,6 +21,7 @@ difference, for free.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 
 import numpy as np
@@ -66,6 +67,15 @@ class StationaryBootstrap:
     Block lengths are geometric with mean `expected_block`; 21 days (one trading
     month) is the default because it spans the horizon over which daily equity
     returns show meaningful dependence without destroying the sample size.
+
+    **Every comparison draws from its own stream, keyed by name.** An earlier
+    version held one generator on the instance and advanced it across successive
+    comparisons, which made each arm's interval depend on its *position in the
+    iteration order* rather than on the seed alone. Reordering the arms — which
+    happens whenever the results directory is re-globbed — silently moved every
+    published confidence interval and p-value, by as much as 0.02 (0.09 after
+    Holm). Point estimates were unaffected, so nothing looked wrong. Deriving the
+    stream from `(seed, key)` makes results order-independent and reproducible.
     """
 
     def __init__(
@@ -78,58 +88,67 @@ class StationaryBootstrap:
         self.n_resamples = n_resamples
         self.expected_block = expected_block
         self.confidence_level = confidence_level
-        self.rng = np.random.default_rng(seed)
+        self.seed = seed
+
+    def _rng_for(self, key: str) -> np.random.Generator:
+        """A generator determined solely by `(self.seed, key)`.
+
+        blake2b rather than `hash()`, whose string hashing is randomized per
+        process and would break reproducibility across runs.
+        """
+        digest = hashlib.blake2b(key.encode("utf-8"), digest_size=8).digest()
+        return np.random.default_rng([self.seed, int.from_bytes(digest, "big")])
 
     def paired_sharpe_difference(
-        self, treatment: pd.Series, control: pd.Series
+        self, treatment: pd.Series, control: pd.Series, key: str = ""
     ) -> BootstrapInterval:
         """CI for Sharpe(treatment) - Sharpe(control) on a common date index.
 
         Both paths are resampled with the *same* block indices, which preserves
         the contemporaneous correlation between the two strategies — the reason a
         paired test is more powerful than two independent ones.
+
+        `key` identifies the comparison and fixes its random stream; pass a stable
+        label (typically the arm name) so the interval reproduces exactly.
         """
-        aligned = pd.concat([treatment, control], axis=1).dropna()
-        a = aligned.iloc[:, 0].to_numpy(dtype=float)
-        b = aligned.iloc[:, 1].to_numpy(dtype=float)
-        observed = annualized_sharpe(a) - annualized_sharpe(b)
-
-        draws = np.empty(self.n_resamples, dtype=float)
-        for i in range(self.n_resamples):
-            index = self._resample_index(len(a))
-            draws[i] = annualized_sharpe(a[index]) - annualized_sharpe(b[index])
-
-        return self._to_interval(observed, draws)
+        return self._bootstrap(treatment, control, annualized_sharpe, key)
 
     def paired_statistic(
         self,
         treatment: pd.Series,
         control: pd.Series,
         statistic,
+        key: str = "",
     ) -> BootstrapInterval:
         """CI for ``statistic(treatment) - statistic(control)`` under the same blocks.
 
         Used for the drawdown and volatility differences reported alongside Sharpe.
         """
+        return self._bootstrap(treatment, control, statistic, key)
+
+    def _bootstrap(
+        self, treatment: pd.Series, control: pd.Series, statistic, key: str
+    ) -> BootstrapInterval:
         aligned = pd.concat([treatment, control], axis=1).dropna()
         a = aligned.iloc[:, 0].to_numpy(dtype=float)
         b = aligned.iloc[:, 1].to_numpy(dtype=float)
         observed = statistic(a) - statistic(b)
 
+        rng = self._rng_for(key)
         draws = np.empty(self.n_resamples, dtype=float)
         for i in range(self.n_resamples):
-            index = self._resample_index(len(a))
+            index = self._resample_index(len(a), rng)
             draws[i] = statistic(a[index]) - statistic(b[index])
 
         return self._to_interval(observed, draws)
 
-    def _resample_index(self, n: int) -> np.ndarray:
+    def _resample_index(self, n: int, rng: np.random.Generator) -> np.ndarray:
         """Draw one stationary-bootstrap index path of length `n`."""
         p_restart = 1.0 / self.expected_block
         index = np.empty(n, dtype=int)
-        index[0] = self.rng.integers(n)
-        restarts = self.rng.random(n) < p_restart
-        new_starts = self.rng.integers(0, n, size=n)
+        index[0] = rng.integers(n)
+        restarts = rng.random(n) < p_restart
+        new_starts = rng.integers(0, n, size=n)
         for t in range(1, n):
             index[t] = new_starts[t] if restarts[t] else (index[t - 1] + 1) % n
         return index

@@ -59,6 +59,17 @@ from fpso.evaluation.style import (
 
 DEFAULT_FIGURE_DIR = Path("paper/figures")
 
+COST_AXIS_LABEL = "Transaction cost (per trade)"
+"""Axis label for the cost sweep.
+
+Previously "One-way transaction cost", which was wrong in a way that mattered:
+the rate is charged per trade on traded notional, while turnover is reported
+one-way, so a reader multiplying an axis value by a turnover figure understated
+the realised drag by exactly a factor of two — and the product of those two
+quantities is this study's central claim. A cost rate is neither one-way nor
+two-way; only the turnover is. See :func:`fpso.backtest.ledger.cost_per_unit_turnover`.
+"""
+
 
 def _save(fig, directory: Path, stem: str) -> Path:
     """Write both a PDF (for the camera-ready) and a PNG (for quick review).
@@ -343,7 +354,7 @@ def plot_cost_sensitivity(
             label_line_end(ax, rates[-1], values[-1], arm, colors[arm])
 
         pad_right(ax, 0.22)
-        ax.set_xlabel("One-way transaction cost")
+        ax.set_xlabel(COST_AXIS_LABEL)
         ax.set_ylabel(metric.replace("_", " ").title())
         ax.set_title("Sensitivity to transaction costs", loc="left")
         as_percent(ax.xaxis, decimals=1)
@@ -454,7 +465,7 @@ def plot_cost_conditional_effects(
             label_line_end(ax, rates[-1], deltas[-1], arm, colors[arm])
 
         pad_right(ax, 0.30)
-        ax.set_xlabel("One-way transaction cost")
+        ax.set_xlabel(COST_AXIS_LABEL)
         ax.set_ylabel(f"Sharpe difference vs. {baseline}")
         ax.set_title("Where each mechanism starts to pay", loc="left")
         as_percent(ax.xaxis, decimals=1)
@@ -507,7 +518,7 @@ def plot_turnover_matched_comparison(
 
             ax.axhline(0.0, color=BASELINE, lw=1.0)
             ax.set_title(label, loc="left", fontsize=10)
-            ax.set_xlabel("One-way transaction cost")
+            ax.set_xlabel(COST_AXIS_LABEL)
             as_percent(ax.xaxis, decimals=1)
 
         axes[0].set_ylabel("Sharpe difference")
@@ -551,6 +562,11 @@ def plot_turnover_explains_effect(
     Args:
         turnover: mean one-way turnover per rebalance, indexed by arm.
         effect: Sharpe difference vs. the baseline at `cost_label`, same index.
+        cost_label: the per-trade rate the effect was measured at. This figure
+            puts a turnover on one axis and a cost-conditioned effect on the
+            other, so it is the one place a reader is most likely to multiply
+            the two; the axis says "per trade" because the realised drag is
+            twice that rate times this turnover.
     """
     from scipy import stats
 
@@ -593,7 +609,7 @@ def plot_turnover_explains_effect(
 
         pad_right(ax, 0.12)
         ax.set_xlabel("Mean one-way turnover per rebalance")
-        ax.set_ylabel(f"Sharpe difference vs. static (at {cost_label} cost)")
+        ax.set_ylabel(f"Sharpe difference vs. static (at {cost_label} per trade)")
         ax.set_title("Turnover orders every arm in the study", loc="left")
         ax.legend(loc="upper right")
         add_caption(
@@ -649,3 +665,259 @@ def _assign_series_colors(named) -> dict[str, str]:
         used.add(role)
         assigned[name] = SERIES_COLORS[role]
     return assigned
+
+
+def plot_noise_floor(
+    seed_sharpes: pd.Series,
+    effects: pd.Series,
+    directory: Path = DEFAULT_FIGURE_DIR,
+    stem: str = "f10_noise_floor",
+    cost_label: str = "1.0%",
+) -> Path:
+    """F10: the study's effect sizes drawn inside the spread of re-running one arm.
+
+    The argument of the whole paper in one panel. Re-running a single arm with a
+    different random seed — same data, same configuration, same universe — moves
+    realised Sharpe by more than any mechanism the study measures. Every effect
+    the literature would report is smaller than the dispersion of the measurement
+    instrument that produced it.
+
+    One horizontal axis in Sharpe units carries both objects, so the comparison is
+    read off directly rather than inferred across two scales. The seeds are drawn
+    as individual marks, not a box plot: with n = 30 the raw points *are* the
+    distribution, and a box would substitute a five-number summary for the thing
+    being claimed.
+
+    Effects are anchored at the seed mean, so each bar's far end is where that
+    mechanism would land if applied to the average run — which makes "inside the
+    cloud" a spatial fact rather than an arithmetic one.
+
+    Args:
+        seed_sharpes: realised Sharpe of every seed of the baseline arm at one
+            cost level.
+        effects: signed Sharpe difference of each published effect, indexed by a
+            display label. Drawn in descending order of magnitude.
+    """
+    values = np.asarray(seed_sharpes, dtype=float)
+    mean, low, high = float(values.mean()), float(values.min()), float(values.max())
+    ordered = effects.reindex(effects.abs().sort_values(ascending=False).index)
+
+    with paper_style():
+        fig, (ax_seeds, ax_effects) = plt.subplots(
+            2, 1, figsize=(7.0, 4.4), height_ratios=[2, 3],
+            sharex=True, gridspec_kw={"hspace": 0.18},
+        )
+
+        # --- the noise floor -------------------------------------------------
+        jitter = np.linspace(-0.28, 0.28, len(values))
+        ax_seeds.hlines(0, low, high, color=SERIES_COLORS["static"], lw=2.0, alpha=0.30)
+        ax_seeds.scatter(
+            values, jitter, s=34, color=SERIES_COLORS["static"],
+            edgecolor=SURFACE, linewidth=0.8, zorder=3,
+        )
+        ax_seeds.axvline(mean, color=INK_SECONDARY, lw=1.0, ls="--", zorder=2)
+        ax_seeds.set_ylim(-1.0, 1.0)
+        ax_seeds.set_yticks([])
+        ax_seeds.set_ylabel("Seeds", rotation=0, ha="right", va="center", labelpad=12)
+        ax_seeds.set_title(
+            f"One arm, {len(values)} seeds — and every effect the study reports",
+            loc="left",
+        )
+        # Anchored to the left end of the range rather than its midpoint, which
+        # sits on top of the mean line.
+        ax_seeds.annotate(
+            f"seed spread {high - low:.3f}",
+            xy=(low, 0.62), xytext=(2, 0), textcoords="offset points",
+            ha="left", va="bottom", fontsize=8, color=INK_SECONDARY,
+        )
+
+        # --- the effects, on the same scale ----------------------------------
+        positions = np.arange(len(ordered))[::-1]
+        for position, (label, effect) in zip(positions, ordered.items(), strict=True):
+            ax_effects.plot(
+                [mean, mean + effect], [position, position],
+                color=INK_SECONDARY, lw=3.0, solid_capstyle="round", zorder=3,
+            )
+            ax_effects.scatter(
+                [mean + effect], [position], s=30, color=INK_PRIMARY,
+                edgecolor=SURFACE, linewidth=0.8, zorder=4,
+            )
+            ax_effects.annotate(
+                f"{label}  {effect:+.3f}",
+                xy=(mean + effect, position), xytext=(6 if effect >= 0 else -6, 0),
+                textcoords="offset points", va="center",
+                ha="left" if effect >= 0 else "right",
+                fontsize=8, color=INK_SECONDARY,
+            )
+
+        # The seed range as a backdrop: a bar ending inside it is an effect the
+        # instrument cannot resolve from a re-run of its own baseline.
+        ax_effects.axvspan(low, high, color=SERIES_COLORS["static"], alpha=0.10, zorder=0)
+        ax_effects.axvline(mean, color=INK_SECONDARY, lw=1.0, ls="--", zorder=2)
+        ax_effects.set_yticks([])
+        ax_effects.set_ylim(-0.8, len(ordered) - 0.2)
+        ax_effects.set_ylabel("Effects", rotation=0, ha="right", va="center", labelpad=12)
+        ax_effects.set_xlabel(f"Sharpe ratio (at {cost_label} per trade)")
+        pad_right(ax_effects, 0.22)
+
+        # Counted, not asserted. An earlier version of this caption claimed every
+        # effect fell inside the band; two do not, and a caption that argues with
+        # its own figure is worse than no caption.
+        inside = int(((mean + ordered >= low) & (mean + ordered <= high)).sum())
+        add_caption(
+            ax_effects,
+            f"Shaded band is the seed range of the baseline arm ({high - low:.3f} "
+            f"Sharpe). {inside} of {len(ordered)} effects terminate inside it,\n"
+            "including the headline regime effect and the algorithmic ablation: "
+            "the optimizer's own dispersion\nexceeds most of the quantities it is "
+            "being used to estimate.",
+            offset_points=-44.0,
+        )
+    return _save(fig, directory, stem)
+
+
+def plot_conviction(
+    frequency: pd.DataFrame,
+    profile,
+    directory: Path = DEFAULT_FIGURE_DIR,
+    stem: str = "f11_conviction",
+) -> Path:
+    """F11: how many of its own positions the optimizer can defend.
+
+    Two panels answering two different questions on the same measurement.
+
+    The upper panel pools every (rebalance, candidate) pair and asks what
+    agreement across runs actually looks like. If the optimizer expressed views,
+    the mass would sit at the ends — chosen or rejected. It does not: it sits in
+    the middle, where runs disagree.
+
+    The lower panel asks whether that changes with the market, and answers no.
+    Fourteen years and roughly seven crisis episodes leave the count of defensible
+    holdings flat, which is the evidence that this is a property of the search
+    rather than of conditions. A measure that moved with volatility would be
+    describing genuine ambiguity in the problem; a flat one is describing the
+    solver.
+
+    Args:
+        frequency: `(dates, assets)` inclusion frequencies.
+        profile: the matching :class:`~fpso.evaluation.conviction.ConvictionProfile`.
+    """
+    pooled = frequency.to_numpy().ravel()
+    pooled = pooled[pooled > 0.0]
+
+    with paper_style():
+        fig, (ax_hist, ax_time) = plt.subplots(
+            2, 1, figsize=(7.0, 4.6), height_ratios=[3, 2],
+            gridspec_kw={"hspace": 0.55},
+        )
+
+        # --- what agreement looks like ---------------------------------------
+        ax_hist.hist(
+            pooled, bins=np.linspace(0, 1, 21),
+            color=SERIES_COLORS["static"], edgecolor=SURFACE, linewidth=0.8,
+        )
+        low, high = 0.1, 0.9
+        ax_hist.axvspan(low, high, color=INK_MUTED, alpha=0.10, zorder=0)
+        ax_hist.set_xlabel("Fraction of runs holding the name")
+        ax_hist.set_ylabel("Rebalance-name pairs")
+        ax_hist.set_title(
+            "The optimizer rarely agrees with itself about what to hold", loc="left"
+        )
+        ax_hist.annotate(
+            "contested", xy=(0.5, ax_hist.get_ylim()[1] * 0.92),
+            ha="center", va="top", fontsize=8, color=INK_SECONDARY,
+        )
+        as_percent(ax_hist.xaxis)
+
+        # --- and it does not change with the market --------------------------
+        strong = profile.table["strong"]
+        ax_time.plot(strong.index, strong.to_numpy(), color=SERIES_COLORS["static"], lw=1.2)
+        ax_time.axhline(
+            float(strong.mean()), color=INK_SECONDARY, lw=1.0, ls="--", zorder=2
+        )
+        ax_time.set_ylabel("Defensible\nholdings")
+        ax_time.set_ylim(0, max(12, float(strong.max()) + 2))
+        ax_time.set_title(
+            f"Mean {strong.mean():.1f} of 20 positions held by 90% or more of runs, "
+            "unchanged across the window",
+            loc="left", fontsize=9,
+        )
+
+        add_caption(
+            ax_time,
+            f"{profile.summary()}. Computed from the decisions themselves rather "
+            "than from a second model,\nso the explanation cannot disagree with "
+            "what the optimizer did.",
+            offset_points=-40.0,
+        )
+    return _save(fig, directory, stem)
+
+
+def plot_injection_points(
+    directory: Path = DEFAULT_FIGURE_DIR,
+    stem: str = "f12_injection_points",
+) -> Path:
+    """F12: the three points at which a state signal can enter the optimizer.
+
+    A schematic, not a result. It exists because the paper's central claim is one
+    of *exhaustiveness* — that preferences, beliefs and forecasts are the only
+    places a detected regime can act on a mean-variance decision — and that claim
+    is carried entirely by prose otherwise. A reader who does not accept the
+    taxonomy cannot evaluate the result, so the taxonomy needs to be visible.
+
+    Reading left to right: the detector produces a posterior over states; that
+    posterior can modify the objective's weights, the covariance estimate, or the
+    expected-return vector; all three then feed one unchanged constrained solver.
+    Holding the solver fixed across the three is what makes them comparable.
+    """
+    with paper_style():
+        fig, ax = plt.subplots(figsize=(7.2, 3.0))
+        ax.set_xlim(0, 10)
+        ax.set_ylim(0, 6)
+        ax.axis("off")
+
+        def box(x, y, w, h, text, *, color=INK_SECONDARY, fill=SURFACE, weight="normal"):
+            ax.add_patch(plt.Rectangle(
+                (x, y), w, h, facecolor=fill, edgecolor=color, linewidth=1.2, zorder=2
+            ))
+            ax.text(
+                x + w / 2, y + h / 2, text, ha="center", va="center",
+                fontsize=8.5, color=INK_PRIMARY, zorder=3, fontweight=weight,
+            )
+
+        def arrow(x1, y1, x2, y2, color=INK_MUTED):
+            ax.annotate(
+                "", xy=(x2, y2), xytext=(x1, y1),
+                arrowprops=dict(arrowstyle="->", color=color, lw=1.2, shrinkA=2, shrinkB=2),
+                zorder=1,
+            )
+
+        box(0.1, 2.4, 1.7, 1.2, "Market\nfeatures")
+        box(2.2, 2.4, 1.7, 1.2, "Regime\ndetector", color=SERIES_COLORS["regime"])
+        ax.text(2.05, 3.75, r"posterior $P(s_t \mid \mathcal{F}_t)$",
+                fontsize=7.5, color=INK_SECONDARY, ha="left")
+        arrow(1.8, 3.0, 2.2, 3.0)
+
+        # The three injection points, each on its own row.
+        points = [
+            (4.6, "1. Preferences", r"$\lambda_v,\ \lambda_t,\ K,\ u$"),
+            (2.7, "2. Beliefs", r"$\mathbf{\Sigma}$"),
+            (0.8, "3. Expected returns", r"$\boldsymbol{\mu}$"),
+        ]
+        for y, title, symbol in points:
+            box(4.6, y, 2.5, 1.1, f"{title}\n{symbol}", color=SERIES_COLORS["regime"])
+            arrow(3.9, 3.0, 4.6, y + 0.55)
+            arrow(7.1, y + 0.55, 7.8, 3.0)
+
+        box(7.8, 2.4, 2.0, 1.2, "Constrained\nsolver", color=INK_PRIMARY, weight="bold")
+        ax.text(8.8, 2.1, "identical across all three",
+                fontsize=7, color=INK_MUTED, ha="center", va="top", style="italic")
+
+        add_caption(
+            ax,
+            "Each injection point is tested against its own signal-free permutation "
+            "control, its own lookahead\noracle, and a static arm whose turnover "
+            "penalty is solved to match its realised trading.",
+            offset_points=-6.0,
+        )
+    return _save(fig, directory, stem)

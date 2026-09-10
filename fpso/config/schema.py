@@ -121,6 +121,21 @@ class RegimeConfig:
     """Seed for detectors with their own randomness (EM init, label shuffling)."""
     constant_label: str = "CALM"
     """Label pinned by the `constant` detector; ignored by every other detector."""
+    archive_seeds: int = 0
+    """How many swarm particles to seed from the regime solution archive.
+
+    0 disables the mechanism entirely, which is the default and reproduces every
+    arm run before it existed. The archive is a *search accelerator*: it changes
+    where the search starts, never the objective, the constraints, or the
+    universe, so any effect it has is on time-to-converge rather than on the
+    optimum being sought.
+    """
+    archive_capacity: int = 5
+    """Solutions retained per state. See fpso.regime.archive."""
+    archive_mode: str = "weights"
+    """How an archived solution becomes a seed: "weights" replays the stored
+    vector, "support" replays only the asset selection and applies it to current
+    holdings. See fpso.regime.archive.RegimeSolutionArchive.seeds_for."""
 
     def overrides_for(self, label: RegimeLabel) -> Mapping[str, float]:
         """Parameter overrides for `label`, or an empty mapping if unspecified."""
@@ -169,7 +184,14 @@ class ExperimentConfig:
     optimizer: str = "fpso"
     """fpso, equal_weight, or min_variance."""
     moment_estimator: str = "sample"
-    """sample (flat trailing window) or regime_weighted (the second mechanism)."""
+    """sample (flat trailing window), regime_weighted (the beliefs mechanism), or
+    regime_tilt (the expected-return mechanism)."""
+    tilt_scorer: str = "defensive"
+    """Which cross-section the tilt points at: defensive (low volatility, derived
+    from returns), net_issuance or size (both exogenous — see fpso.data.tilt)."""
+    tilt_strength: Mapping[str, float] = field(default_factory=dict)
+    """RegimeLabel name -> tilt strength on mu, in units of sd(mu). Empty leaves
+    mu untouched, so `regime_tilt` with no strengths is exactly the baseline."""
     seeds: tuple[int, ...] = tuple(range(30))
     transaction_cost_rates: tuple[float, ...] = (0.0, 0.005, 0.01, 0.015)
     base_params: FPSOParams = field(default_factory=FPSOParams)

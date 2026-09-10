@@ -1,0 +1,14 @@
+# TEMPORARY - 52-seed power run for the PSO-term ablation only.
+#
+# Written to a SEPARATE results_dir on purpose. Adding seeds 30-51 to `static`
+# inside results/ would give it 52 runs while every other arm has 30, and
+# ArmResult.mean_returns averages over whatever runs exist - so every "paired"
+# comparison in the paper would silently become a 52-seed mean against a
+# 30-seed mean. The isolation keeps every published number stable.
+#
+# 52 seeds is what the study's own power analysis prescribes for this effect
+# (-0.032 Sharpe, sd 0.083 -> ~52 for 80% power at alpha = 0.05).
+extends: ../base.yaml
+name: static
+results_dir: results_ablation52
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51]

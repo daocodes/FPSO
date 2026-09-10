@@ -1,0 +1,21 @@
+# TREATMENT for the expected-return injection point (mechanism 3).
+#
+# The detected state tilts mu toward defensive names: none in CALM, a modest tilt
+# in TURBULENT, a full one in CRISIS. Strength is posterior-weighted, so a 55/45
+# call applies about half the tilt rather than switching discretely on a coin flip.
+#
+# This is the only mechanism that moves the *optimum*. Conditioning hyperparameters
+# changed the route (null); conditioning Sigma changed the risk estimate (turnover
+# artifact). Tilting mu relocates the peak of the fitness landscape, so the swarm's
+# own attraction dynamics carry it to the favoured names with no change to the
+# optimizer, the constraints, or the universe.
+extends: ../base.yaml
+name: tilt_hmm
+moment_estimator: regime_tilt
+tilt_strength:
+  CALM: 0.0
+  TURBULENT: 0.5
+  CRISIS: 1.0
+regime:
+  detector: hmm
+  overrides: {}

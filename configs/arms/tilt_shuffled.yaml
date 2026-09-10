@@ -1,0 +1,18 @@
+# SIGNAL-FREE CONTROL for `tilt_hmm`.
+#
+# Identical tilt schedule, but the state labels have had their episodes permuted:
+# marginals and dwell times preserved exactly, timing destroyed. The tilt fires
+# just as often and for just as long, at the wrong moments.
+#
+# Any difference between this and `tilt_hmm` is attributable to *when* the tilt is
+# applied, which is the only thing a regime detector can contribute.
+extends: ../base.yaml
+name: tilt_shuffled
+moment_estimator: regime_tilt
+tilt_strength:
+  CALM: 0.0
+  TURBULENT: 0.5
+  CRISIS: 1.0
+regime:
+  detector: shuffled
+  overrides: {}

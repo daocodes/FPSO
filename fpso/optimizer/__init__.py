@@ -27,12 +27,19 @@ __all__ = [
 
 def build_optimizer(name: str, params):
     """Instantiate the allocator named in ``ExperimentConfig.optimizer``."""
-    from fpso.baselines.allocators import EqualWeightAllocator, MinimumVarianceAllocator
+    from fpso.baselines.allocators import (
+        EqualWeightAllocator,
+        LowVolatilityAllocator,
+        MinimumVarianceAllocator,
+    )
+    from fpso.optimizer.fpso_cw import FPSOCWOptimizer
 
     allocators = {
         "fpso": FPSOOptimizer,
+        "fpso_cw": FPSOCWOptimizer,
         "equal_weight": EqualWeightAllocator,
         "min_variance": MinimumVarianceAllocator,
+        "low_volatility": LowVolatilityAllocator,
     }
     if name not in allocators:
         raise ValueError(

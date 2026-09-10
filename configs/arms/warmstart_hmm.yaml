@@ -1,0 +1,16 @@
+# TREATMENT for the search-acceleration mechanism.
+#
+# Regime-keyed solution archive: the HMM names the current state, the archive
+# returns the best portfolios previously found in that state, and those seed the
+# swarm. FPSO is unchanged and is never told regimes exist — it receives extra
+# starting points and searches from them.
+#
+# Nothing about the optimization problem moves: same objective, same constraints,
+# same universe, same 60-iteration budget. Only the starting points differ, so any
+# effect must show up as time-to-converge rather than as a different optimum.
+extends: ../base.yaml
+name: warmstart_hmm
+regime:
+  detector: hmm
+  archive_seeds: 8
+  overrides: {}

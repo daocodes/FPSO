@@ -1,13 +1,21 @@
 """Result containers and the reproducibility manifest written beside them.
 
 Every persisted result set carries a manifest recording the config, the git SHA,
-the interpreter and the versions of the packages that can change numerical
-output. A reviewer holding the artifact can therefore tell whether a figure came
-from the code they are reading.
+a content hash of the package source, the interpreter and the versions of the
+packages that can change numerical output. A reviewer holding the artifact can
+therefore tell whether a figure came from the code they are reading.
+
+The source hash exists because the git SHA cannot answer that question on its
+own. ``git status --porcelain`` reports the whole working tree, so regenerating
+a figure stamps every subsequent run ``-dirty`` without a line of source having
+changed — which is exactly what happened to this study's first result matrix.
+:func:`source_hash` digests the `fpso` package itself, so two runs sharing it
+provably executed the same code, committed or not.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import platform
 import subprocess
@@ -20,6 +28,7 @@ import numpy as np
 import pandas as pd
 
 from fpso.config.schema import ExperimentConfig
+from fpso.determinism import threading_report
 
 
 @dataclass(frozen=True)
@@ -35,6 +44,14 @@ class RebalanceRecord:
     n_active: int
     objective_value: float
     solve_seconds: float
+    iters_to_converge: int
+    """Iterations to first reach 99% of this solve's final objective.
+
+    The speed claim is about reaching a given solution quality sooner, so the
+    quantity that matters is iteration count at fixed quality rather than wall
+    clock at fixed iteration budget. Derived from the optimizer's convergence
+    trace; -1 for closed-form allocators, which have no iterations to count.
+    """
     params: dict[str, Any]
 
     def to_row(self) -> dict[str, Any]:
@@ -48,6 +65,7 @@ class RebalanceRecord:
             "n_active": self.n_active,
             "objective_value": self.objective_value,
             "solve_seconds": self.solve_seconds,
+            "iters_to_converge": self.iters_to_converge,
         }
         for state, probability in enumerate(self.regime_posterior):
             row[f"posterior_{state}"] = probability
@@ -176,15 +194,26 @@ def build_manifest(config: ExperimentConfig, arm: str, seed: int) -> dict[str, A
         "seed": seed,
         "created_utc": datetime.now(UTC).isoformat(),
         "git_sha": _git_sha(),
+        "source_hash": source_hash(),
         "python": platform.python_version(),
         "platform": platform.platform(),
         "packages": _package_versions(),
+        # A run that used eight BLAS threads is not bit-comparable with one that
+        # used one, and after the fact the difference is otherwise undetectable.
+        "threading": threading_report(),
         "config": _to_plain(config),
     }
 
 
 def _git_sha() -> str:
-    """Current commit, or a marker when the tree is not a git checkout."""
+    """Current commit, or a marker when the tree is not a git checkout.
+
+    The ``-dirty`` suffix reflects the state of the *whole* working tree, which
+    includes ``results/`` and ``paper/``. Regenerating a figure therefore marks a
+    run dirty without a line of source having changed, so this field alone cannot
+    establish which code produced a result. That is what :func:`source_hash` is
+    for; record and compare both.
+    """
     try:
         sha = subprocess.check_output(
             ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, text=True
@@ -195,6 +224,30 @@ def _git_sha() -> str:
         return f"{sha}{'-dirty' if dirty else ''}"
     except (subprocess.CalledProcessError, FileNotFoundError):
         return "unknown"
+
+
+def source_hash() -> str:
+    """SHA-256 over the `fpso` package source: the code that produced a result.
+
+    A git SHA identifies a *commit*; this identifies the *bytes that ran*. Two
+    runs sharing a source hash executed identical code whether or not either
+    tree was committed, which is the property a reproducibility claim actually
+    needs and the one a dirty-tree marker cannot supply.
+
+    Only ``.py`` files under the package root are hashed, in sorted path order,
+    each contributing its relative path as well as its contents so that renaming
+    a module changes the hash. Byte-compiled caches are excluded.
+    """
+    import fpso
+
+    root = Path(fpso.__file__).resolve().parent
+    digest = hashlib.sha256()
+    for path in sorted(root.rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        digest.update(str(path.relative_to(root)).encode())
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
 
 
 def _package_versions() -> dict[str, str]:

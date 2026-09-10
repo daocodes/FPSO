@@ -1,0 +1,10 @@
+# FPSO-CW twin of `ablation_no_pso` (pure firefly, pso_blend = 0).
+# Supporting ablation - pure firefly (pso_blend = 0), i.e. the algorithm as it
+# was implemented before this refactor. Isolates the contribution of the PSO
+# personal/global-best refinement term.
+extends: ../base.yaml
+name: ablation_no_pso_cw
+base_params:
+  pso_blend: 0.0
+
+optimizer: fpso_cw

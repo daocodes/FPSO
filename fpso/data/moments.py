@@ -15,8 +15,8 @@ risk in its inputs instead of being told about it through a penalty weight.
 
 That distinction is why the first mechanism failed. Conditioning the objective's
 risk aversion on regime modulates the optimizer's *preferences* while leaving its
-*beliefs* stale; the oracle arm showed that even perfect labels bought nothing
-that way. This moves the signal upstream, into the beliefs.
+*beliefs* stale; the oracle arm showed that even hindsight-perfect *contemporaneous*
+labels bought nothing that way. This moves the signal upstream, into the beliefs.
 """
 
 from __future__ import annotations
@@ -230,8 +230,24 @@ class RegimeWeightedMoments(MomentEstimator):
         return weights.to_numpy(dtype=float)
 
 
-def build_moment_estimator(name: str, min_observations: int) -> MomentEstimator:
+def build_moment_estimator(
+    name: str,
+    min_observations: int,
+    tilt_strength: dict[str, float] | None = None,
+    scorer: str = "defensive",
+    market_cap: pd.DataFrame | None = None,
+) -> MomentEstimator:
     """Instantiate the estimator named by ``ExperimentConfig.moment_estimator``."""
+    if name == "regime_tilt":
+        # Imported here: tilt.py imports from this module, so a top-level import
+        # would be circular.
+        from fpso.data.tilt import RegimeTiltedMoments, build_scorer
+
+        return RegimeTiltedMoments(
+            base=SampleMoments(min_observations=min_observations),
+            scorer=build_scorer(scorer, market_cap),
+            strength_by_state=dict(tilt_strength or {}),
+        )
     if name == "sample":
         return SampleMoments(min_observations=min_observations)
     if name == "regime_weighted":
@@ -239,6 +255,6 @@ def build_moment_estimator(name: str, min_observations: int) -> MomentEstimator:
     if name == "regime_weighted_mean":
         return RegimeWeightedMoments(min_observations=min_observations, weight_mean=True)
     raise ValueError(
-        f"Unknown moment_estimator '{name}'; expected sample, regime_weighted "
-        "or regime_weighted_mean."
+        f"Unknown moment_estimator '{name}'; expected sample, regime_weighted, "
+        "regime_weighted_mean or regime_tilt."
     )

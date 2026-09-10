@@ -1,0 +1,17 @@
+# NO-TIMING CONTROL for tilt_net_issuance.
+#
+# The same exogenous tilt at constant strength, no regime conditioning. Separates
+# "this outside information is useful" from "this outside information is useful
+# AT THE RIGHT MOMENT". Every earlier mechanism lost to its own no-timing control.
+extends: ../base.yaml
+name: tilt_net_issuance_constant
+moment_estimator: regime_tilt
+tilt_scorer: net_issuance
+tilt_strength:
+  CALM: 0.5
+  TURBULENT: 0.5
+  CRISIS: 0.5
+regime:
+  detector: constant
+  constant_label: CALM
+  overrides: {}

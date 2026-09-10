@@ -1,0 +1,18 @@
+# TREATMENT (support mode) for the search-acceleration mechanism.
+#
+# Same regime-keyed archive as `warmstart_hmm`, but a seed replays only *which
+# assets* were held in this state, applied to the current portfolio, rather than
+# replaying stale weights.
+#
+# Motivated by a measured failure: replaying archived weight vectors seeds the
+# swarm worse than a random Dirichlet draw (initial fitness 0.204 vs 0.228),
+# because the turnover term scores a two-year-old portfolio against today's
+# holdings. Selection is the part of a past solution that might generalize across
+# time; exact weights are the part that cannot.
+extends: ../base.yaml
+name: warmstart_support
+regime:
+  detector: hmm
+  archive_seeds: 8
+  archive_mode: support
+  overrides: {}

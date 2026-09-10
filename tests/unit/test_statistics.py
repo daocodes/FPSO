@@ -83,9 +83,50 @@ def test_bootstrap_works_for_arbitrary_statistics():
 
 def test_block_resampling_preserves_sample_length():
     bootstrap = StationaryBootstrap(n_resamples=1, expected_block=21)
-    index = bootstrap._resample_index(500)
+    index = bootstrap._resample_index(500, np.random.default_rng(0))
     assert len(index) == 500
     assert index.min() >= 0 and index.max() < 500
+
+
+def test_intervals_do_not_depend_on_comparison_order():
+    """Each comparison must own its random stream.
+
+    A single generator shared across comparisons makes every interval depend on
+    where its arm falls in the iteration order, so re-globbing the results
+    directory silently moves published confidence intervals while leaving the
+    point estimates — the only thing anyone checks — untouched.
+    """
+    rng = np.random.default_rng(11)
+    index = pd.date_range("2015-01-01", periods=400, freq="B")
+    arms = {n: pd.Series(rng.normal(4e-4, 0.01, 400), index=index) for n in "xyz"}
+    control = pd.Series(rng.normal(3e-4, 0.01, 400), index=index)
+
+    def lower_bounds(order):
+        bootstrap = StationaryBootstrap(n_resamples=200)
+        return {
+            name: bootstrap.paired_sharpe_difference(arms[name], control, key=name).lower
+            for name in order
+        }
+
+    assert lower_bounds("xyz") == lower_bounds("zyx")
+
+
+def test_intervals_reproduce_across_instances():
+    """Same seed and key must give the same interval in a fresh process state."""
+    rng = np.random.default_rng(3)
+    index = pd.date_range("2015-01-01", periods=300, freq="B")
+    treatment = pd.Series(rng.normal(5e-4, 0.01, 300), index=index)
+    control = pd.Series(rng.normal(3e-4, 0.01, 300), index=index)
+
+    first = StationaryBootstrap(n_resamples=150).paired_sharpe_difference(
+        treatment, control, key="arm_a"
+    )
+    second = StationaryBootstrap(n_resamples=150).paired_sharpe_difference(
+        treatment, control, key="arm_a"
+    )
+    assert (first.lower, first.upper, first.p_value) == (
+        second.lower, second.upper, second.p_value
+    )
 
 
 # ----------------------------------------------------------- ledoit and wolf --

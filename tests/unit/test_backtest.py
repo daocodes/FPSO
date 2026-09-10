@@ -4,6 +4,12 @@ The ledger tests check the accounting the paper depends on: that a fully-investe
 target reproduces the underlying asset return exactly at zero cost, that
 transaction costs monotonically reduce performance, and that the portfolio drifts
 between rebalances rather than being silently re-weighted daily.
+
+`test_cost_drag_is_twice_rate_times_one_way_turnover` is the load-bearing one.
+The study's central claim is that net performance is ordered by turnover, so the
+relationship between the cost axis and the reported turnover is not an accounting
+detail — it is the claim. That relationship carries a factor of two, it was once
+mislabeled on three figure axes, and this test is what stops that recurring.
 """
 
 from __future__ import annotations
@@ -13,7 +19,7 @@ import pandas as pd
 import pytest
 
 from fpso.backtest.engine import RollingBacktestEngine
-from fpso.backtest.ledger import VectorBTLedger
+from fpso.backtest.ledger import VectorBTLedger, cost_per_unit_turnover
 from fpso.backtest.schedule import AnnualSchedule, MonthlySchedule
 
 # ------------------------------------------------------------------ schedule --
@@ -104,6 +110,50 @@ def test_turnover_is_reported_per_rebalance(two_asset_returns):
     assert len(result.turnover) == 3
     # The full switch at date 2 trades essentially the whole portfolio one way.
     assert result.turnover.loc[dates[1]] == pytest.approx(1.0, abs=0.02)
+
+
+def test_cost_per_unit_turnover_is_twice_the_per_trade_rate():
+    """The conversion every table and axis label must go through."""
+    assert cost_per_unit_turnover(0.0) == 0.0
+    assert cost_per_unit_turnover(0.005) == pytest.approx(0.010)
+    assert cost_per_unit_turnover(0.015) == pytest.approx(0.030)
+
+
+@pytest.mark.parametrize("rate", [0.005, 0.01, 0.015])
+def test_cost_drag_is_twice_rate_times_one_way_turnover(two_asset_returns, rate):
+    """The invariant that makes the cost axis readable next to a turnover figure.
+
+    The fee is charged per trade on traded notional; the turnover reported
+    alongside it is one-way, i.e. already halved. So the drag a reader should
+    expect from `rate` and `turnover` is `cost_per_unit_turnover(rate) * turnover`,
+    not `rate * turnover`.
+
+    This was mislabeled as "one-way transaction cost" on three figure axes, which
+    invited exactly the factor-of-two error — in a study whose central claim is
+    about the product of these two quantities. Asserting it here means the
+    convention cannot drift back silently.
+
+    The realised gap runs ~1-3% under the notional prediction because the fee is
+    taken out of the portfolio before the day's return is computed, so the
+    tolerance is one-sided in magnitude rather than exact.
+    """
+    ledger = VectorBTLedger(two_asset_returns)
+    dates = two_asset_returns.index[[0, 40]]
+    targets = pd.DataFrame(
+        [[1.0, 0.0], [0.0, 1.0]], index=dates, columns=two_asset_returns.columns
+    )
+
+    free = ledger.simulate(targets, transaction_cost_rate=0.0)
+    paid = ledger.simulate(targets, transaction_cost_rate=rate)
+
+    for trade_date in dates:
+        realised_drag = free.returns.loc[trade_date] - paid.returns.loc[trade_date]
+        predicted = cost_per_unit_turnover(rate) * paid.turnover.loc[trade_date]
+        assert realised_drag == pytest.approx(predicted, rel=0.035)
+        # And the naive product must be visibly wrong, or the test proves nothing.
+        assert realised_drag > 1.5 * rate * paid.turnover.loc[trade_date]
+
+    assert paid.cost_per_unit_turnover == pytest.approx(2.0 * rate)
 
 
 # -------------------------------------------------------------------- engine --

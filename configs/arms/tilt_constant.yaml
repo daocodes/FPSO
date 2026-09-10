@@ -1,0 +1,22 @@
+# NO-TIMING CONTROL for `tilt_hmm`.
+#
+# The same defensive tilt applied at the same average strength in EVERY state,
+# with no regime conditioning at all. Separates "tilting toward defensives helps"
+# from "tilting toward defensives AT THE RIGHT TIME helps".
+#
+# This is the arm that matters most. A permanent defensive tilt is close to a
+# low-volatility screen, and low-vol is a documented anomaly — so if `tilt_hmm`
+# cannot beat this, the mechanism has rediscovered low-vol investing and the
+# regime is decorative. Same shape as `moments_longwindow`, which caught exactly
+# this class of confound for the covariance mechanism.
+extends: ../base.yaml
+name: tilt_constant
+moment_estimator: regime_tilt
+tilt_strength:
+  CALM: 0.5
+  TURBULENT: 0.5
+  CRISIS: 0.5
+regime:
+  detector: constant
+  constant_label: CALM
+  overrides: {}

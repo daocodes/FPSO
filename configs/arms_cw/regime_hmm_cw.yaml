@@ -1,0 +1,9 @@
+# FPSO-CW twin of `regime_hmm`. Identical in every respect except that the
+# weighting sub-problem is solved exactly on the swarm's support.
+# Arm 2 - HEADLINE. Gaussian HMM regime detection driving the parameter policy.
+extends: ../regime_policy.yaml
+name: regime_hmm_cw
+regime:
+  detector: hmm
+
+optimizer: fpso_cw

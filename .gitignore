@@ -1,15 +1,42 @@
+# Secrets
 .env
+
 # Python
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.ruff_cache/
 .venv/
 
-# macOS
+# Editors / OS
+.vscode/
 .DS_Store
 
-# Research artifacts (rebuildable; too large to commit)
+# Research artifacts: rebuildable from cache/ via the experiment entry points,
+# and far too large to version. Every result directory carries a manifest.json
+# recording the config, source hash and library versions that produced it.
 cache/
 cache_synth/
 results/
 results_smoke/
+results_cw/
+results_ablation52/
+results_reproduction/
+
+# Manuscript build directories and submission bundles
+FPSO_Final/
+FPSO_Final_v2/
+*.zip
+
+# Working notes and manuscript drafts kept locally, not part of the published repo
+docs/main.md
+docs/main_submission.md
+docs/icaif26_paper.md
+docs/icaif26_plan.md
+docs/icaif_direction.md
+docs/icaif_topic_map.md
+docs/iocrf26_abstract.md
+docs/adaptive_shrinkage.md
+docs/fpso_enhancements.md
+docs/results_current.md
+docs/seed_identification_study.md
